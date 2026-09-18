@@ -1,0 +1,16 @@
+# MOOSE FEA Output Meshes & Logs
+*_out.e
+*.e.*-*
+*.csv
+
+# MOOSE Compiled Executables
+*-opt
+*-dbg
+
+# System & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+
+# STEP to Cubit log file
+*.log
