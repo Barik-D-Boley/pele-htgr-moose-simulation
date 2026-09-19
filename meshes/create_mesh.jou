@@ -1,0 +1,53 @@
+# ==============================================================================
+# Coreform Cubit Journal File: HTGR RVE Matrix
+# ==============================================================================
+reset
+
+# 1. Import Geometry
+import step "../cad/htgr_rve_matrix.STEP" heal
+
+# Convert to SI units (Meters)
+volume all scale 0.001
+
+# 2. Mesh Specification & Execution
+volume 1 scheme sweep
+volume 1 size 0.00055 
+mesh volume 1
+
+# 3. Boundary Identification (Sidesets)
+
+# Top and Bottom
+create sideset 1
+sideset 1 add surface with z_coord > 0.019 
+sideset 1 name "top_face"
+
+create sideset 2
+sideset 2 add surface with z_coord < 0.001
+sideset 2 name "bottom_face"
+
+# X-Axis Symmetry Planes (Replace # with your actual surface IDs)
+sideset 3 surface 5
+sideset 3 name "symm_x_min"
+
+sideset 4 surface 2
+sideset 4 name "symm_x_max"
+
+# Y-Axis Symmetry Planes (Replace # with your actual surface IDs)
+sideset 5 surface 1
+sideset 5 name "symm_y_min"
+
+sideset 6 surface 4
+sideset 6 name "symm_y_max"
+
+# Curved channels (Replace # # with your two curved surface IDs)
+sideset 7 surface 3 6
+sideset 7 name "channel_walls"
+
+# 4. Material Block Assignment
+create block 1
+block 1 add volume 1
+block 1 name "matrix_graphite"
+
+# 5. Export Mesh
+export mesh "htgr_rve_mesh.e" overwrite
+system "del step_import.log"
