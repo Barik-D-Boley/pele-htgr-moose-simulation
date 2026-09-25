@@ -20,6 +20,13 @@
   []
 []
 
+[Functions]
+  [openmc_power_map]
+    type = PiecewiseMultilinear
+    data_file = '../coupling/power_map.csv'
+  []
+[]
+
 [GlobalParams]
   # Globally define displacement variables for the SolidMechanics physics block
   displacements = 'disp_x disp_y disp_z'
@@ -63,10 +70,11 @@
 
   # Heat flux from the TRISO compact entering the graphite matrix
   [fuel_heat_flux]
-    type = NeumannBC
+    type = FunctionNeumannBC
     variable = temperature
     boundary = 'fuel_wall'
-    value = 5e5  # Placeholder: W/m^2 (Positive value adds heat to the domain)
+    function = openmc_power_map
+    factor = 45000
   []
 
   # --- Symmetry Kinematic Constraints ---
