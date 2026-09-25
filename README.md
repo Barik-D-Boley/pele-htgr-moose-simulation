@@ -39,6 +39,18 @@ Rather than assuming uniform heat generation, this project calculates the spatia
 * Process Exodus II results in ParaView to identify peak stress concentrations along the fuel-graphite interface.
 * Document structural safety margins and local peaking factors for microreactor core licensing considerations.
 
+### Phase 5: Verification of Simulated Conditions
+* **CAD Geometry (.STEP):** Verify component dimensions, spacing, and part alignments against the 18.80 mm × 9.40 mm RVE design basis to ensure no unintended volumes or overlaps exist.
+* **Coreform Cubit Meshing (.jou / .e):** Inspect the generated HEX8 mesh for element quality metrics (e.g., Jacobian, aspect ratio), confirm proper unit scaling (converting CAD millimeters to MOOSE SI meters), and ensure boundary sideset IDs exactly match the expected MOOSE block names.
+* **OpenMC & Coupling Scripts (.py):** Review `openmc_rve_model.py` to confirm accurate HALEU TRISO enrichment (19.75%), H-451 graphite density, and cross-section assignments. Check `map_power.py` to ensure the bounding box of the 3D RegularMesh tally perfectly aligns with the spatial domain of the finite element mesh.
+* **MOOSE Multiphysics Inputs (.i):** Cross-reference the parsed block names against the Exodus file. Validate that boundary conditions (symmetry rollers, coolant convection), initial reference temperatures, and material properties (thermal conductivity, thermal expansion, Young's modulus) are assigned to the correct material blocks.
+
+### Phase 6: Repository Documentation (README)
+* **Dependency Management:** Detail the complete software stack requirements, including specific compatible versions for the MOOSE Framework, OpenMC, Coreform Cubit, and necessary Python packages (`h5py`, `scipy`).
+* **Visual Evidence:** Embed high-resolution renders from the `images/` directory showcasing the OpenMC spatial heating gradient alongside the resulting MOOSE temperature and von Mises stress fields.
+* **Execution Workflow:** Provide the clear, step-by-step CLI commands required to run the toolchain end-to-end, from the initial `python` neutronics solve to the final `mpiexec` multiphysics execution.
+* **Physics Summary:** Synthesize the final findings, highlighting the quantified difference in peak stress concentrations between the mapped first-principles heat generation versus a uniform heat assumption.
+
 ## Project Structure
 
 ```text
