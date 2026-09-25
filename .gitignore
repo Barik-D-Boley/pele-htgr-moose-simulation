@@ -1,16 +1,40 @@
-# MOOSE FEA Output Meshes & Logs
-*_out.e
-*.e.*-*
-*.csv
-
-# MOOSE Compiled Executables
-*-opt
-*-dbg
-
 # System & Editor Files
 .DS_Store
 Thumbs.db
 .vscode/
 
+# Python & Environment Cache
+__pycache__/
+*.py[cod]
+.venv/
+*.env
+
 # STEP to Cubit log file
 *.log
+
+# OpenMC Nuclear Data Downloads & Extracts
+*.xz
+*-hdf5/
+endfb-viii.0-hdf5/
+nndc_hdf5/
+
+# OpenMC Run Outputs & Generated Files
+statepoint.*.h5
+summary.h5
+tallies.out
+neutronics/*.xml
+
+# Exodus, Nemesis, and CSV output files
+*_out.e
+*.e.*-*
+*.n
+*.nem
+*.csv
+
+# MOOSE checkpoint and recovery directories
+*_cp/
+*_csv/
+
+# MOOSE Compiled Executables
+*-opt
+*-dbg

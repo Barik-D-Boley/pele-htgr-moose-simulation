@@ -25,23 +25,27 @@ create sideset 2
 sideset 2 add surface with z_coord < 0.001
 sideset 2 name "bottom_face"
 
-# X-Axis Symmetry Planes (Replace # with your actual surface IDs)
+# X-Axis Symmetry Planes
 sideset 3 surface 5
 sideset 3 name "symm_x_min"
 
 sideset 4 surface 2
 sideset 4 name "symm_x_max"
 
-# Y-Axis Symmetry Planes (Replace # with your actual surface IDs)
+# Y-Axis Symmetry Planes
 sideset 5 surface 1
 sideset 5 name "symm_y_min"
 
 sideset 6 surface 4
 sideset 6 name "symm_y_max"
 
-# Curved channels (Replace # # with your two curved surface IDs)
-sideset 7 surface 3 6
-sideset 7 name "channel_walls"
+# Fuel hole
+sideset 7 surface 6
+sideset 7 name "fuel_wall"
+
+# Coolant hole
+sideset 8 surface 3
+sideset 8 name "coolant_wall"
 
 # 4. Material Block Assignment
 create block 1

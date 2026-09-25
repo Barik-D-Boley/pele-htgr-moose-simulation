@@ -1,0 +1,11 @@
+# conda env create -f environment.yml
+name: openmc_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - openmc=0.16.0
+  - h5py
+  - scipy
+  - numpy
+  - matplotlib
