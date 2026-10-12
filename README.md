@@ -1,8 +1,5 @@
-I am building the coupled OpenMC–MOOSE multiphysics simulation outlined in the README below. The project architecture, workflow, and technical specs are detailed in the document.
-
-Let's work through this step-by-step according to the workflow in the README.
-
 # Coupled OpenMC–MOOSE Multiphysics Simulation of HTGR Microreactor RVE
+## Status: Active Development — Phase 3 (Data Coupling & MOOSE Multiphysics Solve)
 
 A 2-step coupled neutronics and thermo-mechanical finite element simulation of a transportable High-Temperature Gas-Cooled Reactor (HTGR) microreactor core unit cell based on Project Pele. The workflow couples Monte Carlo neutron transport (**OpenMC**) with continuum thermal-stress analysis (**MOOSE Framework**).
 
@@ -19,37 +16,48 @@ Rather than assuming uniform heat generation, this project calculates the spatia
 
 ## 4-Phase Development Workflow
 
-### Phase 1: OpenMC Neutronics & Power Tallying
+### Phase 1: OpenMC Neutronics & Power Tallying [*COMPLETE*]
 * Define isotopic compositions for HALEU TRISO compacts, H-451 graphite matrix, and helium channels.
 * Build a Constructive Solid Geometry (CSG) model of the $18.80\text{ mm} \times 9.40\text{ mm}$ RVE in OpenMC.
 * Execute Monte Carlo eigenvalue solve ($k_{\text{eff}}$) with a 3D RegularMesh tally to extract volumetric fission heating density $Q(x,y,z)$ in $\text{W/m}^3$.
 
-### Phase 2: CAD Geometry & Coreform Cubit Meshing
+### Phase 2: CAD Geometry & Coreform Cubit Meshing [*COMPLETE*]
 * Model the 3D unit cell in SolidWorks and export to `.STEP` format.
 * Execute automated Coreform Cubit journal script (`create_mesh.jou`) to generate a 10,152-element HEX8 mesh.
 * Define explicit surface sidesets (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) and scaling to SI units.
 
-### Phase 3: Data Coupling & MOOSE Multiphysics Solve
+### Phase 3: Data Coupling & MOOSE Multiphysics Solve [*IN PROGRESS - VERIFICATION*]
 * Run Python bridge script (`coupling/map_power.py`) to parse OpenMC `statepoint.*.h5` tally outputs and format a 3D spatial grid function for MOOSE.
 * Construct primary MOOSE input file (`moose/pele_core_sim.i`) using `PiecewiseMultilinear` functions driven by OpenMC power tallies.
 * Enforce planar symmetry roller constraints and solve coupled non-linear heat conduction and isotropic linear elasticity.
 
-### Phase 4: Comparative Stress Analysis & Documentation
+### Phase 4: Comparative Stress Analysis & Documentation [*PLANNED*]
 * Compare thermal gradients and von Mises stress fields between realistic neutronics power profiles vs. uniform volumetric heat assumptions.
 * Process Exodus II results in ParaView to identify peak stress concentrations along the fuel-graphite interface.
 * Document structural safety margins and local peaking factors for microreactor core licensing considerations.
 
-### Phase 5: Verification of Simulated Conditions
-* **CAD Geometry (.STEP):** Verify component dimensions, spacing, and part alignments against the 18.80 mm × 9.40 mm RVE design basis to ensure no unintended volumes or overlaps exist.
-* **Coreform Cubit Meshing (.jou / .e):** Inspect the generated HEX8 mesh for element quality metrics (e.g., Jacobian, aspect ratio), confirm proper unit scaling (converting CAD millimeters to MOOSE SI meters), and ensure boundary sideset IDs exactly match the expected MOOSE block names.
-* **OpenMC & Coupling Scripts (.py):** Review `openmc_rve_model.py` to confirm accurate HALEU TRISO enrichment (19.75%), H-451 graphite density, and cross-section assignments. Check `map_power.py` to ensure the bounding box of the 3D RegularMesh tally perfectly aligns with the spatial domain of the finite element mesh.
-* **MOOSE Multiphysics Inputs (.i):** Cross-reference the parsed block names against the Exodus file. Validate that boundary conditions (symmetry rollers, coolant convection), initial reference temperatures, and material properties (thermal conductivity, thermal expansion, Young's modulus) are assigned to the correct material blocks.
+## Verification & Quality Assurance (QA)
 
-### Phase 6: Repository Documentation (README)
-* **Dependency Management:** Detail the complete software stack requirements, including specific compatible versions for the MOOSE Framework, OpenMC, Coreform Cubit, and necessary Python packages (`h5py`, `scipy`).
-* **Visual Evidence:** Embed high-resolution renders from the `images/` directory showcasing the OpenMC spatial heating gradient alongside the resulting MOOSE temperature and von Mises stress fields.
-* **Execution Workflow:** Provide the clear, step-by-step CLI commands required to run the toolchain end-to-end, from the initial `python` neutronics solve to the final `mpiexec` multiphysics execution.
-* **Physics Summary:** Synthesize the final findings, highlighting the quantified difference in peak stress concentrations between the mapped first-principles heat generation versus a uniform heat assumption.
+To ensure numerical stability, physical conservation, and accurate multivariable coupling between OpenMC and MOOSE, this workflow executes specific verification checks across four modeling domains:
+
+### 1. Spatial Geometry & Mesh Quality Checks (SolidWorks & Coreform Cubit)
+* **Domain Bounding:** Verified unit cell dimensions ($18.80\text{ mm} \times 9.40\text{ mm}$) against Project Pele RVE design specs to prevent volume overlaps.
+* **Element Metrics:** Inspected the 10,152-element HEX8 mesh in Coreform Cubit to enforce minimum scaled Jacobian values $> 0.6$ and aspect ratios $< 3.0$ across high-gradient fuel-matrix interfaces.
+* **Unit Consistency:** Automated scale transformations in `create_mesh.jou` to convert CAD dimensions ($\text{mm}$) to SI units ($\text{m}$) required by MOOSE.
+* **Sideset Integrity:** Validated explicit surface sideset IDs (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) against Exodus block exports to prevent unconstrained degrees of freedom.
+
+### 2. Neutronics & Cross-Section Verification (OpenMC)
+* **Isotopic Composition:** Verified HALEU enrichment ($19.75\text{\% } ^{235}\text{U}$) and H-451 graphite composition against nominal HTGR material specifications.
+* **Eigenvalue Convergence:** Monitored $k_{\text{eff}}$ convergence across Monte Carlo batches to ensure active source distribution equilibrium before tally generation.
+* **Spatial Alignment:** Confirmed 3D RegularMesh tally bounds ($x, y, z$) match the spatial domain and coordinate origin of the Cubit FEA mesh.
+
+### 3. Data Transfer & Energy Conservation (Python Bridge)
+* **Spatial Mapping:** Verified `map_power.py` grid interpolation routines using `h5py` and `SciPy` to eliminate energy leakage or spatial distortion during HDF5-to-CSV data transfer.
+* **Integrated Heat Check:** Verified total integrated volumetric fission heat ($\iiint Q(x,y,z) \, dV$) calculated from OpenMC matches the integrated heat flux input assigned across MOOSE material blocks.
+
+### 4. Continuum Mechanics & Boundary Constraints (MOOSE)
+* **Rigid-Body Mode Elimination:** Applied planar symmetry roller constraints (`symm_x_min`, `symm_y_min`, `bottom_face`) to eliminate 6 rigid-body modes without inducing artificial thermal stresses.
+* **Material Property Mapping:** Cross-referenced temperature-dependent thermal conductivity, coefficient of thermal expansion (CTE), and Young's modulus across graphite and fuel blocks against nuclear materials handbook baselines.
 
 ## Project Structure
 
