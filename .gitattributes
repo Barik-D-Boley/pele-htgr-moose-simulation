@@ -1,0 +1,4 @@
+*.i linguist-documentation
+*.e linguist-vendored
+*.jou linguist-documentation
+*.py linguist-language=Python
