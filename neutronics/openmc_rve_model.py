@@ -10,16 +10,18 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 haleu = openmc.Material(name='HALEU TRISO')
 haleu.add_nuclide('U235', 0.1975)
 haleu.add_nuclide('U238', 0.8025)
-haleu.add_element('O', 2.0)
+haleu.add_nuclide('O16', 1.999242) # Absorbed the trace O18 fraction here
+haleu.add_nuclide('O17', 0.000758)
 haleu.set_density('g/cm3', 10.5)
 
 graphite = openmc.Material(name='H-451 Graphite')
-graphite.add_element('C', 1.0)
+graphite.add_nuclide('C0', 1.0)    # ENDF-7.1 uses C0 for natural Carbon
 graphite.set_density('g/cm3', 1.74)
 graphite.add_s_alpha_beta('c_Graphite')
 
 helium = openmc.Material(name='Helium Coolant')
-helium.add_element('He', 1.0)
+helium.add_nuclide('He3', 0.000002)
+helium.add_nuclide('He4', 0.999998)
 helium.set_density('g/cm3', 0.0015)
 
 materials = openmc.Materials([haleu, graphite, helium])
