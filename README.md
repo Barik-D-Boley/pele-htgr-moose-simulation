@@ -59,7 +59,8 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 ### 2. Neutronics & Cross-Section Verification (OpenMC)
 * **Isotopic Composition:** Verified HALEU enrichment ($19.75\text{\% } ^{235}\text{U}$) and H-451 graphite composition against nominal HTGR material specifications.
 * **Eigenvalue Convergence:** Monitored $k_{\text{eff}}$ convergence across Monte Carlo batches to ensure active source distribution equilibrium before tally generation.
-* **Spatial Alignment:** Confirmed 3D RegularMesh tally bounds ($x, y, z$) match the spatial domain and coordinate origin of the Cubit FEA mesh.
+* **Spatial Alignment:** OpenMC geometry uses the same corner origin and dimensions as the CAD / Cubit mesh (converted cm $\leftrightarrow$ m).
+* **Tally Estimator Verification:** The cylindrical fuel-mesh tally uses the *collision* estimator. In OpenMC 0.16 the default tracklength estimator on this mesh (whose edges coincide with reflective boundaries) produced a spurious ~16% radial tilt and axial end bumps; collision results agree with an independent fine `RegularMesh` tally to within ~0.5%.
 
 ### 3. Data Transfer & Energy Conservation (Python Bridge)
 * **Spatial Mapping:** Verified `map_power.py` grid interpolation routines using `h5py` and `SciPy` to eliminate energy leakage or spatial distortion during HDF5-to-CSV data transfer.

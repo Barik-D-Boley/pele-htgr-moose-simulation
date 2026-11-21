@@ -43,7 +43,14 @@ FUEL_CENTER = (CELL_X, CELL_Y)
 
 # --- TRISO layer materials ---
 kernel = openmc.Material(name='UO2 kernel (19.75% HALEU)')
-kernel.add_element('U', 1.0, enrichment=19.75)
+# 19.75% enrichment is by WEIGHT. Convert to atom fractions so we can set the
+# isotopes directly (OpenMC's built-in 'enrichment=' option adds U-234 using a
+# rule that is only valid below ~5% enrichment).
+ENRICHMENT_WT = 0.1975
+n235 = ENRICHMENT_WT / 235.0439
+n238 = (1.0 - ENRICHMENT_WT) / 238.0508
+kernel.add_nuclide('U235', n235 / (n235 + n238))
+kernel.add_nuclide('U238', n238 / (n235 + n238))
 kernel.add_element('O', 2.0)
 kernel.set_density('g/cm3', 10.4)
 
@@ -155,6 +162,12 @@ fuel_mesh = openmc.CylindricalMesh(
 power_tally = openmc.Tally(name='fuel_power')
 power_tally.filters = [openmc.MeshFilter(fuel_mesh)]
 power_tally.scores = ['kappa-fission']   # recoverable fission energy
+# IMPORTANT: use the 'collision' estimator. With the default tracklength
+# estimator, this cylindrical mesh (whose edges sit exactly on the reflective
+# cell boundaries) gave badly wrong shapes in OpenMC 0.16: a fake ~16%
+# center-to-edge tilt and fake end bumps. Collision results were verified
+# against an independent fine RegularMesh tally and agree to within ~0.5%.
+power_tally.estimator = 'collision'
 
 tallies = openmc.Tallies([power_tally])
 
