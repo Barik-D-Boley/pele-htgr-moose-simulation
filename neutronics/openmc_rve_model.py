@@ -1,15 +1,21 @@
 """
 OpenMC model of the Project Pele HTGR quarter-cell RVE.
 
-Geometry (matches cad/htgr_rve_matrix.STEP and the Cubit mesh exactly):
-  * Box: x = 0 -> 18.80 mm, y = 0 -> 9.40 mm, z = 0 -> 20.0 mm
+Geometry (cross-section matches cad/htgr_rve_matrix.STEP and the Cubit mesh):
+  * Cross-section: x = 0 -> 18.80 mm, y = 0 -> 9.40 mm
   * Quarter COOLANT hole: radius 7.94 mm, centered on the corner (0, 0)
   * Quarter FUEL compact: radius 6.35 mm, centered on the corner (18.80, 9.40)
   * Everything else is H-451 graphite
+  * FULL-HEIGHT FUEL COLUMN: fuel from z = 0 to z = 80 cm (same z range as the
+    Cubit mesh), with solid graphite reflectors above and below. The coolant
+    hole runs through the reflectors.
 
 OpenMC works in centimeters, so all dimensions below are in cm.
-All six outer faces are reflective, which means "this cell repeats forever
-in every direction" -- the standard way to model one cell of a big lattice.
+The four SIDE faces are reflective ("this column repeats forever sideways"),
+but the TOP and BOTTOM are vacuum (neutrons that leave are lost). That axial
+leakage is what makes the power peak in the middle of the column and drop
+off toward the ends -- the effect we want to compare against the uniform
+assumption.
 
 Output: statepoint.<batches>.h5 containing k-eff and a 'fuel_power' tally
 (fission energy deposited in each small piece of the fuel compact).
@@ -27,7 +33,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ==============================================================================
 CELL_X = 1.880      # RVE width  (x)
 CELL_Y = 0.940      # RVE depth  (y)
-HEIGHT = 2.000      # RVE height (z)
+HEIGHT = 80.0       # active fuel height (z); must match the Cubit mesh
+REFLECTOR = 40.0    # graphite reflector thickness above and below the fuel
 
 COOLANT_R = 0.794   # coolant hole radius, centered at (0, 0)
 FUEL_R = 0.635      # fuel compact radius, centered at (CELL_X, CELL_Y)
@@ -114,17 +121,24 @@ x_min = openmc.XPlane(0.0, boundary_type='reflective')
 x_max = openmc.XPlane(CELL_X, boundary_type='reflective')
 y_min = openmc.YPlane(0.0, boundary_type='reflective')
 y_max = openmc.YPlane(CELL_Y, boundary_type='reflective')
-z_min = openmc.ZPlane(0.0, boundary_type='reflective')
-z_max = openmc.ZPlane(HEIGHT, boundary_type='reflective')
-box = +x_min & -x_max & +y_min & -y_max & +z_min & -z_max
+z_bottom = openmc.ZPlane(-REFLECTOR, boundary_type='vacuum')
+z_fuel_bottom = openmc.ZPlane(0.0)
+z_fuel_top = openmc.ZPlane(HEIGHT)
+z_top = openmc.ZPlane(HEIGHT + REFLECTOR, boundary_type='vacuum')
+sides = +x_min & -x_max & +y_min & -y_max
+core = sides & +z_fuel_bottom & -z_fuel_top          # active fuel height
+column = sides & +z_bottom & -z_top                  # including reflectors
 
 coolant_cyl = openmc.ZCylinder(x0=0.0, y0=0.0, r=COOLANT_R)
 fuel_cyl = openmc.ZCylinder(x0=FUEL_CENTER[0], y0=FUEL_CENTER[1], r=FUEL_R)
 
-fuel_cell = openmc.Cell(name='fuel', fill=fuel, region=-fuel_cyl & box)
-coolant_cell = openmc.Cell(name='coolant', fill=helium, region=-coolant_cyl & box)
+# Helium runs the full length of the column (through the reflectors too)
+coolant_cell = openmc.Cell(name='coolant', fill=helium, region=-coolant_cyl & column)
+# Fuel only in the active height
+fuel_cell = openmc.Cell(name='fuel', fill=fuel, region=-fuel_cyl & core)
+# Graphite everywhere else: the matrix around the fuel, plus the reflectors
 graphite_cell = openmc.Cell(name='graphite', fill=graphite,
-                            region=+fuel_cyl & +coolant_cyl & box)
+                            region=+coolant_cyl & column & ~(-fuel_cyl & core))
 
 geometry = openmc.Geometry([fuel_cell, coolant_cell, graphite_cell])
 
@@ -132,9 +146,18 @@ geometry = openmc.Geometry([fuel_cell, coolant_cell, graphite_cell])
 # 3. SETTINGS
 # ==============================================================================
 settings = openmc.Settings()
-settings.batches = 150      # total batches
-settings.inactive = 50      # batches thrown away while the fission source settles
+settings.batches = 250      # total batches
+settings.inactive = 100     # batches thrown away while the fission source settles
 settings.particles = 20000  # neutrons per batch (more = less statistical noise)
+
+# Shannon entropy: one number per batch that measures how spread out the
+# fission source is. When it stops drifting, the source has settled and it is
+# safe to start tallying. Check it with neutronics/check_convergence.py.
+entropy_mesh = openmc.RegularMesh()
+entropy_mesh.lower_left = [0.0, 0.0, 0.0]
+entropy_mesh.upper_right = [CELL_X, CELL_Y, HEIGHT]
+entropy_mesh.dimension = [1, 1, 40]
+settings.entropy_mesh = entropy_mesh
 
 # Start neutrons uniformly in the fuel compact region
 source_box = openmc.stats.Box(
@@ -147,15 +170,14 @@ settings.source = openmc.IndependentSource(space=source_box,
 # 4. TALLIES (for MOOSE coupling)
 # ==============================================================================
 # A cylindrical mesh wrapped around the fuel axis, covering ONLY the fuel.
-# This way no tally bin is half-fuel/half-graphite, so the power shape near
-# the compact edge is captured accurately.
-#   r:   10 rings from the axis out to the compact edge
-#   phi: 6 slices across the quarter (180 deg -> 270 deg points into the cell)
-#   z:   5 axial slices
+# This way no tally bin is half-fuel/half-graphite.
+#   r:   5 equal-AREA rings (so each ring gets similar statistics)
+#   phi: 3 slices across the quarter (180 deg -> 270 deg points into the cell)
+#   z:   40 axial slices of 2 cm -- the axial shape is the main effect now
 fuel_mesh = openmc.CylindricalMesh(
-    r_grid=np.linspace(0.0, FUEL_R, 11),
-    phi_grid=np.linspace(np.pi, 1.5 * np.pi, 7),
-    z_grid=np.linspace(0.0, HEIGHT, 6),
+    r_grid=FUEL_R * np.sqrt(np.linspace(0.0, 1.0, 6)),
+    phi_grid=np.linspace(np.pi, 1.5 * np.pi, 4),
+    z_grid=np.linspace(0.0, HEIGHT, 41),
     origin=(FUEL_CENTER[0], FUEL_CENTER[1], 0.0),
     name='fuel_mesh')
 

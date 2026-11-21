@@ -25,7 +25,8 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 
 ### Phase 1: OpenMC Neutronics & Power Tallying [*COMPLETE*]
 * Define isotopic compositions for HALEU TRISO compacts, H-451 graphite matrix, and helium channels.
-* Build a Constructive Solid Geometry (CSG) model of the $18.80\text{ mm} \times 9.40\text{ mm} \times 20.0\text{ mm}$ quarter-cell RVE in OpenMC, matching the CAD exactly (quarter coolant hole $r = 7.94$ mm at the origin corner, quarter fuel compact $r = 6.35$ mm at the opposite corner).
+* Build a Constructive Solid Geometry (CSG) model of the $18.80\text{ mm} \times 9.40\text{ mm}$ quarter-cell RVE in OpenMC, matching the CAD cross-section exactly (quarter coolant hole $r = 7.94$ mm at the origin corner, quarter fuel compact $r = 6.35$ mm at the opposite corner).
+* Model a **full-height 80 cm fuel column** with 40 cm graphite reflectors above and below (vacuum at the top and bottom, reflective on the sides), so the axial power shape is physically meaningful.
 * Model the fuel compact as homogenized TRISO particles (35% packing fraction) in a graphite binder.
 * Execute Monte Carlo eigenvalue solve ($k_{\text{eff}}$) with a cylindrical mesh tally on the fuel compact to extract the fission power shape.
 
@@ -58,7 +59,7 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 
 ### 2. Neutronics & Cross-Section Verification (OpenMC)
 * **Isotopic Composition:** Verified HALEU enrichment ($19.75\text{\% } ^{235}\text{U}$) and H-451 graphite composition against nominal HTGR material specifications.
-* **Eigenvalue Convergence:** Monitored $k_{\text{eff}}$ convergence across Monte Carlo batches to ensure active source distribution equilibrium before tally generation.
+* **Eigenvalue Convergence:** Shannon entropy and per-batch $k$ are plotted by `neutronics/check_convergence.py` (`images/source_convergence.png`) to confirm the fission source has settled before the active batches begin.
 * **Spatial Alignment:** OpenMC geometry uses the same corner origin and dimensions as the CAD / Cubit mesh (converted cm $\leftrightarrow$ m).
 * **Tally Estimator Verification:** The cylindrical fuel-mesh tally uses the *collision* estimator. In OpenMC 0.16 the default tracklength estimator on this mesh (whose edges coincide with reflective boundaries) produced a spurious ~16% radial tilt and axial end bumps; collision results agree with an independent fine `RegularMesh` tally to within ~0.5%.
 
@@ -84,6 +85,17 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 └── README.md
 ```
 
+## Preliminary Neutronics Results
+
+From the full-height OpenMC model (ENDF/B-VII.1 data, 20,000 particles × 150 active batches):
+
+* $k_{\text{eff}} = 1.218 \pm 0.0005$ (fresh fuel, no control rods or burnable poisons, ~20% axial leakage).
+* **Axial power peaking factor ≈ 1.43**, at the *ends* of the fuel column, not the middle. Fast flux peaks mid-column, but thermal neutrons build up in the pure-graphite reflectors and flow back into the fuel ends (*reflector peaking*). The middle of the column runs ~8% *below* the average.
+* Radial variation across the compact is only ~1–2%: the homogenized TRISO compact is optically thin.
+* Implication for the comparison: the uniform-heat assumption under-predicts local power at the column ends by ~40%.
+
+![Power profile](images/power_profile.png)
+
 ## How to Run
 
 All commands are run from the repository root in WSL unless noted.
@@ -92,13 +104,18 @@ All commands are run from the repository root in WSL unless noted.
    ```bash
    python neutronics/openmc_rve_model.py
    ```
-   *Outputs `neutronics/statepoint.150.h5` containing $k_{\text{eff}}$ and the fuel power tally.*
+   *Outputs `neutronics/statepoint.250.h5` containing $k_{\text{eff}}$ and the fuel power tally (about 5–10 minutes on 4 cores).*
+
+   Check that the fission source converged:
+   ```bash
+   python neutronics/check_convergence.py
+   ```
 
 2. **Map OpenMC Power Density to MOOSE Grid:**
    ```bash
    python coupling/map_power.py --plot
    ```
-   *Writes `moose/openmc_power.txt` and `images/radial_power_profile.png`. Use `--q-avg` to change the average fuel power density (default `3.0e7` W/m³). If you change it, change `value` in `moose/case_uniform.i` to match.*
+   *Writes `moose/openmc_power.txt` and `images/power_profile.png`. Use `--q-avg` to change the average fuel power density (default `3.0e7` W/m³). If you change it, change `value` in `moose/case_uniform.i` to match.*
 
 3. **Generate Exodus FEA Mesh (re-run whenever the journal changes):**
    ```bash

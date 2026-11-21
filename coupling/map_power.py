@@ -16,7 +16,7 @@ What it does, step by step:
 
 Usage (from the repository root):
     python coupling/map_power.py
-    python coupling/map_power.py --input neutronics/statepoint.150.h5 \
+    python coupling/map_power.py --input neutronics/statepoint.250.h5 \
         --output moose/openmc_power.txt --q-avg 3.0e7 --plot
 """
 import argparse
@@ -26,10 +26,10 @@ import os
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
-# Geometry of the fuel compact in METERS (must match the Cubit mesh)
+# Geometry of the fuel compact in METERS (must match the Cubit mesh).
+# The column height is NOT hard-coded: it is read from the tally mesh.
 FUEL_CENTER_M = (0.0188, 0.0094)
 FUEL_R_M = 0.00635
-HEIGHT_M = 0.020
 
 DEFAULT_Q_AVG = 3.0e7  # W/m^3, average power density in the fuel compact
 
@@ -114,11 +114,11 @@ def make_interpolator(r_edges_cm, phi_edges, z_edges_cm, q):
     return f
 
 
-def build_cartesian_grid(f, nx, ny, nz):
+def build_cartesian_grid(f, nx, ny, nz, height_m):
     """Sample f on a box that just covers the quarter fuel compact."""
     xs = np.linspace(FUEL_CENTER_M[0] - FUEL_R_M, FUEL_CENTER_M[0], nx)
     ys = np.linspace(FUEL_CENTER_M[1] - FUEL_R_M, FUEL_CENTER_M[1], ny)
-    zs = np.linspace(0.0, HEIGHT_M, nz)
+    zs = np.linspace(0.0, height_m, nz)
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing='ij')
     return xs, ys, zs, f(X, Y, Z)
 
@@ -126,7 +126,7 @@ def build_cartesian_grid(f, nx, ny, nz):
 # ------------------------------------------------------------------------------
 # Step 4: energy conservation check
 # ------------------------------------------------------------------------------
-def integrate_over_fuel(xs, ys, zs, grid, n=200):
+def integrate_over_fuel(xs, ys, zs, grid, n=100):
     """Integrate the (trilinearly interpolated) grid over the quarter compact.
 
     This mimics what MOOSE does: it interpolates the grid trilinearly and
@@ -135,13 +135,14 @@ def integrate_over_fuel(xs, ys, zs, grid, n=200):
     """
     interp = RegularGridInterpolator((xs, ys, zs), grid, method='linear',
                                      bounds_error=False, fill_value=None)
+    height_m = zs[-1] - zs[0]
     dr = FUEL_R_M / n
     dphi = 0.5 * np.pi / n
     nz = max(20, len(zs) * 2)
-    dz = HEIGHT_M / nz
+    dz = height_m / nz
     r = (np.arange(n) + 0.5) * dr
     phi = np.pi + (np.arange(n) + 0.5) * dphi
-    z = (np.arange(nz) + 0.5) * dz
+    z = zs[0] + (np.arange(nz) + 0.5) * dz
     R, P, Z = np.meshgrid(r, phi, z, indexing='ij')
     X = FUEL_CENTER_M[0] + R * np.cos(P)
     Y = FUEL_CENTER_M[1] + R * np.sin(P)
@@ -149,8 +150,8 @@ def integrate_over_fuel(xs, ys, zs, grid, n=200):
     return float(np.sum(vals * R) * dr * dphi * dz)
 
 
-def quarter_fuel_volume():
-    return 0.25 * np.pi * FUEL_R_M**2 * HEIGHT_M
+def quarter_fuel_volume(height_m):
+    return 0.25 * np.pi * FUEL_R_M**2 * height_m
 
 
 # ------------------------------------------------------------------------------
@@ -168,27 +169,41 @@ def write_moose_grid(path, xs, ys, zs, grid):
                 fh.write(' '.join(f'{v:.8e}' for v in grid[:, j, k]) + '\n')
 
 
-def plot_profile(r_edges_cm, q, out_png):
+def plot_profiles(r_edges_cm, phi_edges, z_edges_cm, q, rel_err, q_avg, out_png):
+    """Axial (main effect) and radial power shapes vs. the uniform assumption."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 
+    vol = bin_volumes(r_edges_cm, phi_edges, z_edges_cm)
+    axial = (q * vol).sum(axis=(0, 1)) / vol.sum(axis=(0, 1))
+    radial = (q * vol).sum(axis=(1, 2)) / vol.sum(axis=(1, 2))
+    z_c = 0.5 * (z_edges_cm[1:] + z_edges_cm[:-1])
     r_mm = 0.5 * (r_edges_cm[1:] + r_edges_cm[:-1]) * 10.0
-    radial = q.mean(axis=(1, 2))
-    # Area-weighted average = the value the uniform case uses
-    uniform = np.average(radial, weights=np.diff(r_edges_cm**2))
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(r_mm, radial / 1e6, 'o-', label='OpenMC (averaged over angle and height)')
-    ax.axhline(uniform / 1e6, color='gray', ls='--',
-               label='Uniform assumption (same total power)')
-    ax.set_xlabel('Distance from fuel compact axis (mm)')
-    ax.set_ylabel('Power density (MW/m$^3$)')
-    ax.set_title('Radial power shape inside the fuel compact')
-    ax.legend()
-    ax.grid(alpha=0.3)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5),
+                                   gridspec_kw={'width_ratios': [1.4, 1]})
+    ax1.plot(axial / 1e6, z_c, 'o-', ms=3, label='OpenMC')
+    ax1.axvline(q_avg / 1e6, color='gray', ls='--', label='Uniform assumption')
+    ax1.set_xlabel('Power density (MW/m$^3$)')
+    ax1.set_ylabel('Height in fuel column (cm)')
+    ax1.set_title(f'Axial shape (peak/average = {axial.max() / q_avg:.2f})')
+    ax1.legend()
+    ax1.grid(alpha=0.3)
+
+    ax2.plot(r_mm, radial / 1e6, 'o-', label='OpenMC')
+    ax2.axhline(q_avg / 1e6, color='gray', ls='--', label='Uniform assumption')
+    ax2.set_xlabel('Distance from fuel compact axis (mm)')
+    ax2.set_ylabel('Power density (MW/m$^3$)')
+    ax2.set_title('Radial shape (averaged over height)')
+    ax2.set_ylim(0, None)
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+
+    fig.suptitle(f'Fission power in the fuel compact (worst bin error {100 * rel_err.max():.1f}%)')
     fig.tight_layout()
     fig.savefig(out_png, dpi=150)
-    print(f'Saved radial profile plot to {out_png}')
+    print(f'Saved power profile plot to {out_png}')
 
 
 # ------------------------------------------------------------------------------
@@ -208,9 +223,9 @@ def main():
                    help='average fuel power density in W/m^3 (default %(default)g)')
     p.add_argument('--nx', type=int, default=25)
     p.add_argument('--ny', type=int, default=25)
-    p.add_argument('--nz', type=int, default=11)
+    p.add_argument('--nz', type=int, default=81)
     p.add_argument('--plot', action='store_true',
-                   help='also save images/radial_power_profile.png')
+                   help='also save images/power_profile.png')
     args = p.parse_args()
 
     sp_path = args.input or latest_statepoint()
@@ -225,10 +240,16 @@ def main():
     print(f'Power density in fuel: min {q.min():.3e}, max {q.max():.3e}, '
           f'peak/average = {q.max() / args.q_avg:.3f}')
 
-    f = make_interpolator(r_e, p_e, z_e, q)
-    xs, ys, zs, grid = build_cartesian_grid(f, args.nx, args.ny, args.nz)
+    height_m = (z_e[-1] - z_e[0]) / 100.0
+    print(f'Fuel column height from tally mesh: {100 * height_m:.1f} cm')
+    vol = bin_volumes(r_e, p_e, z_e)
+    axial = (q * vol).sum(axis=(0, 1)) / vol.sum(axis=(0, 1))
+    print(f'Axial peaking factor (peak/average) = {axial.max() / args.q_avg:.3f}')
 
-    target = args.q_avg * quarter_fuel_volume()
+    f = make_interpolator(r_e, p_e, z_e, q)
+    xs, ys, zs, grid = build_cartesian_grid(f, args.nx, args.ny, args.nz, height_m)
+
+    target = args.q_avg * quarter_fuel_volume(height_m)
     before = integrate_over_fuel(xs, ys, zs, grid)
     grid *= target / before
     after = integrate_over_fuel(xs, ys, zs, grid)
@@ -241,7 +262,7 @@ def main():
 
     if args.plot:
         os.makedirs('images', exist_ok=True)
-        plot_profile(r_e, q, 'images/radial_power_profile.png')
+        plot_profiles(r_e, p_e, z_e, q, rel_err, args.q_avg, 'images/power_profile.png')
 
 
 if __name__ == '__main__':

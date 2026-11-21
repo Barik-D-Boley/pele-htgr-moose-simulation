@@ -6,22 +6,27 @@
 #   block 2 "fuel_compact"     -- the quarter fuel compact that fills the fuel hole
 # The coolant hole stays empty (it is handled by a convection BC in MOOSE).
 #
-# Layout (mm): box 18.80 x 9.40 x 20.0
+# Layout (mm): box 18.80 x 9.40, FULL fuel-column height 800 mm
 #   coolant hole r = 7.94 at corner (0, 0)
 #   fuel hole    r = 6.35 at corner (18.80, 9.40)
+# The STEP file is only 20 mm tall, so it is stretched 40x in z below.
+# Height must match HEIGHT in neutronics/openmc_rve_model.py (80 cm).
 # ==============================================================================
 reset
 
-# 1. Import the graphite matrix (becomes volume 1) and convert mm -> m
+# 1. Import the graphite matrix (becomes volume 1) and convert mm -> m.
+#    x, y: mm -> m (x 0.001).  z: 20 mm -> 0.8 m (x 0.04).
+#    If Cubit rejects non-uniform scaling, instead change the SolidWorks
+#    extrusion to 800 mm, re-export the STEP, and use "volume all scale 0.001".
 import step "../cad/htgr_rve_matrix.STEP" heal
-volume all scale 0.001
+volume all scale x 0.001 y 0.001 z 0.04
 
 # 2. Build the quarter fuel compact (new volume):
 #    a brick the size of the whole cell, cut by a cylinder on the fuel axis,
 #    then throw away everything except the quarter-cylinder piece.
-brick x 0.0188 y 0.0094 z 0.020
-move volume 2 location 0.0094 0.0047 0.010
-webcut volume 2 with cylinder radius 0.00635 axis z center 0.0188 0.0094 0.010
+brick x 0.0188 y 0.0094 z 0.8
+move volume 2 location 0.0094 0.0047 0.4
+webcut volume 2 with cylinder radius 0.00635 axis z center 0.0188 0.0094 0.4
 # The fuel piece's centroid is at x ~ 0.0161 m; the leftover piece's is at x ~ 0.0079 m.
 delete volume all except 1 with x_coord < 0.012
 
@@ -30,13 +35,18 @@ imprint volume all
 merge volume all
 
 # 4. Mesh (sweep along z)
+#    In-plane element size 0.55 mm (same as before). Along z the power and
+#    temperature change slowly, so use longer elements: 200 layers = 4 mm.
+#    (Aspect ratio ~7 along z is fine for this smooth axial variation.)
+#    Roughly 70-80k elements total. Reduce "interval 200" if it is too slow.
 volume all scheme sweep
 volume all size 0.00055
+curve with length > 0.5 interval 200
 mesh volume all
 
 # 5. Sidesets (picked by position so they include faces of BOTH volumes)
 #    x_coord / y_coord / z_coord refer to the center of each surface.
-sideset 1 add surface with z_coord > 0.0199
+sideset 1 add surface with z_coord > 0.799
 sideset 1 name "top_face"
 
 sideset 2 add surface with z_coord < 0.0001
