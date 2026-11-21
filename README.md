@@ -47,6 +47,7 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 ### Phase 4: Comparative Stress Analysis & Documentation [*PLANNED*]
 * Compare thermal gradients and von Mises stress fields between realistic neutronics power profiles vs. uniform volumetric heat assumptions.
 * Compare cost: OpenMC + mapping + MOOSE wall time (Case B) vs. MOOSE alone (Case A).
+* Automated by `post-processing/compare_cases.py` using line samplers along the column (fuel centerline, graphite next to the fuel wall, graphite next to the coolant wall).
 * Process Exodus II results in ParaView to identify peak stress concentrations along the fuel-graphite interface.
 * Document structural safety margins and local peaking factors for microreactor core licensing considerations.
 
@@ -84,7 +85,7 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 ├── meshes/               # Coreform Cubit .jou scripts and exported Exodus (.e) meshes
 ├── moose/                # MOOSE input files (.i) and material definitions
 ├── neutronics/           # OpenMC Python model, cross-section links, and tally definitions
-├── post-processing/      # ParaView state files (.pvsm) and CSV line plots
+├── post-processing/      # compare_cases.py, comparison summary, ParaView state files
 └── README.md
 ```
 
@@ -133,5 +134,11 @@ All commands are run from the repository root in WSL unless noted.
    ```
    *Outputs `pele_uniform_out.e/.csv` and `pele_openmc_out.e/.csv`. Check that `power_in` ≈ `power_out` in each CSV.*
 
-5. **Visualize Results:**
+5. **Compare the two cases** (from the repository root):
+   ```bash
+   python post-processing/compare_cases.py
+   ```
+   *Prints a side-by-side table (peak temperatures and where they occur, peak stresses, energy balance, compute time including the OpenMC run) and writes `post-processing/comparison_summary.md` and `images/case_comparison.png` (profiles along the column for both cases).*
+
+6. **Visualize Results:**
    Open `moose/pele_uniform_out.e` and `moose/pele_openmc_out.e` in ParaView side by side.

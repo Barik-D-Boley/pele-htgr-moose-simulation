@@ -61,6 +61,12 @@
     order = FIRST
     family = LAGRANGE
   []
+  # Copy of the heat source, so it can be plotted next to the results
+  [power_q]
+    order = CONSTANT
+    family = MONOMIAL
+    block = 'fuel_compact'
+  []
 []
 
 [AuxKernels]
@@ -69,6 +75,12 @@
     variable = z_position
     expression = 'z'
     use_xyzt = true
+  []
+  [power_q]
+    type = FunctionAux
+    variable = power_q
+    function = power_density
+    block = 'fuel_compact'
   []
 []
 
@@ -256,6 +268,41 @@
     type = PerfGraphData
     section_name = 'Root'
     data_type = TOTAL
+  []
+[]
+
+[VectorPostprocessors]
+  # Profiles along the full column height, read by
+  # post-processing/compare_cases.py. Each line runs bottom (z = 0) to top.
+  # 161 points = every 5 mm.
+
+  # Near the fuel compact axis (hottest fuel)
+  [fuel_centerline]
+    type = LineValueSampler
+    variable = 'temperature vonmises_stress power_q'
+    start_point = '0.0186 0.0092 0.0'
+    end_point = '0.0186 0.0092 0.8'
+    num_points = 161
+    sort_by = z
+  []
+  # In the graphite just outside the fuel wall, on the side facing the
+  # coolant hole (fuel/graphite interface stresses)
+  [graphite_near_fuel]
+    type = LineValueSampler
+    variable = 'temperature vonmises_stress'
+    start_point = '0.0122 0.0092 0.0'
+    end_point = '0.0122 0.0092 0.8'
+    num_points = 161
+    sort_by = z
+  []
+  # In the graphite just outside the coolant wall, on the 45-degree line
+  [graphite_near_coolant]
+    type = LineValueSampler
+    variable = 'temperature vonmises_stress'
+    start_point = '0.0058 0.0058 0.0'
+    end_point = '0.0058 0.0058 0.8'
+    num_points = 161
+    sort_by = z
   []
 []
 
