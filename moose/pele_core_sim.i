@@ -97,10 +97,14 @@
     variable = temperature
     boundary = 'coolant_wall'
     T_infinity = T_coolant
-    # PLACEHOLDER. coupling/map_power.py estimates h from the helium flow
-    # implied by the energy balance and currently gets ~150 W/m^2-K (barely
-    # turbulent flow). Decide how to reconcile before trusting temperatures.
-    heat_transfer_coefficient = 2000 # W/m^2-K
+    # Heat transfer coefficient CONSISTENT with the helium flow rate.
+    # The flow is whatever carries the fuel power away with a 250 -> 700 C
+    # rise: only ~1.3 g/s per channel, so the flow is barely turbulent
+    # (Reynolds ~2800) and h is low. coupling/map_power.py prints this
+    # estimate ("Sanity check: ... estimated h") -- if you change the power
+    # or the inlet/outlet temperatures, update this number to match.
+    # (Earlier placeholder was 2000, which would need ~10x more flow.)
+    heat_transfer_coefficient = 150 # W/m^2-K
   []
 
   # All other outer faces: no heat flow (default), because neighboring cells

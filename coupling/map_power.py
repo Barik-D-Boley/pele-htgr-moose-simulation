@@ -365,7 +365,8 @@ def main():
     re, h = estimate_htc(m_dot, 0.5 * (args.t_in + args.t_out))
     regime = 'laminar' if re < 2300 else ('transitional' if re < 10000 else 'turbulent')
     print(f'  Sanity check: Reynolds number ~{re:.0f} ({regime}); '
-          f'estimated h ~{h:.0f} W/m^2-K (MOOSE input uses 2000)')
+          f'estimated h ~{h:.0f} W/m^2-K')
+    print(f'  -> heat_transfer_coefficient in moose/pele_core_sim.i should be ~{h:.0f}')
 
     if args.plot:
         os.makedirs('images', exist_ok=True)

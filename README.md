@@ -32,13 +32,15 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 
 ### Phase 2: CAD Geometry & Coreform Cubit Meshing [*COMPLETE*]
 * Model the 3D unit cell in SolidWorks and export to `.STEP` format.
-* Execute automated Coreform Cubit journal script (`create_mesh.jou`) to generate a swept HEX8 mesh with two blocks: `matrix_graphite` and `fuel_compact`.
+* Model the 3D unit cell at the full 800 mm fuel-column height (corner at the origin, z from 0 to 800 mm).
+* Execute automated Coreform Cubit journal script (`create_mesh.jou`) to generate a swept HEX8 mesh (~40,000 elements, under the 50,000-element Coreform Cubit Learn limit) with two blocks: `matrix_graphite` and `fuel_compact`.
 * Define explicit surface sidesets (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) and scaling to SI units.
 
 ### Phase 3: Data Coupling & MOOSE Multiphysics Solve [*IN PROGRESS - VERIFICATION*]
 * Run Python bridge script (`coupling/map_power.py`) to parse OpenMC `statepoint.*.h5` tally outputs, normalize to the target average power density, and write a 3D x-y-z grid for MOOSE.
 * Shared MOOSE base input (`moose/pele_core_sim.i`) plus two case files that only swap the heat source: `ConstantFunction` (Case A) or `PiecewiseMultilinear` driven by OpenMC (Case B).
 * Helium coolant temperature varies with height from a channel energy balance (downward flow, 250 °C inlet → 700 °C outlet). Each case uses its own power shape for the heat-up, so the uniform case gets a linear profile and the OpenMC case an S-shaped one.
+* The wall heat transfer coefficient ($h \approx 150\text{ W/m}^2\text{K}$) is made consistent with the helium flow implied by that energy balance (Reynolds number ~2,800, barely turbulent), rather than assumed.
 * Enforce planar symmetry roller constraints and solve coupled non-linear heat conduction and isotropic linear elasticity.
 * Built-in energy balance check (`power_in` vs `power_out` postprocessors) and run-time reporting.
 
@@ -54,7 +56,7 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 
 ### 1. Spatial Geometry & Mesh Quality Checks (SolidWorks & Coreform Cubit)
 * **Domain Bounding:** Verified unit cell dimensions ($18.80\text{ mm} \times 9.40\text{ mm}$) against Project Pele RVE design specs to prevent volume overlaps.
-* **Element Metrics:** Inspected the HEX8 mesh in Coreform Cubit to enforce minimum scaled Jacobian values $> 0.6$ and aspect ratios $< 3.0$ across high-gradient fuel-matrix interfaces.
+* **Element Metrics:** Inspected the HEX8 mesh in Coreform Cubit to enforce minimum scaled Jacobian values $> 0.6$. In-plane elements (0.6 mm) resolve the fuel-matrix and coolant-wall gradients; elements are deliberately elongated along $z$ (6.4 mm layers) because axial gradients are gentle, keeping the mesh under the 50,000-element license limit.
 * **Unit Consistency:** Automated scale transformations in `create_mesh.jou` to convert CAD dimensions ($\text{mm}$) to SI units ($\text{m}$) required by MOOSE.
 * **Sideset Integrity:** Validated explicit surface sideset IDs (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) against Exodus block exports to prevent unconstrained degrees of freedom.
 
