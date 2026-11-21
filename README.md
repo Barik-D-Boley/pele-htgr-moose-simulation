@@ -38,6 +38,7 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 ### Phase 3: Data Coupling & MOOSE Multiphysics Solve [*IN PROGRESS - VERIFICATION*]
 * Run Python bridge script (`coupling/map_power.py`) to parse OpenMC `statepoint.*.h5` tally outputs, normalize to the target average power density, and write a 3D x-y-z grid for MOOSE.
 * Shared MOOSE base input (`moose/pele_core_sim.i`) plus two case files that only swap the heat source: `ConstantFunction` (Case A) or `PiecewiseMultilinear` driven by OpenMC (Case B).
+* Helium coolant temperature varies with height from a channel energy balance (downward flow, 250 °C inlet → 700 °C outlet). Each case uses its own power shape for the heat-up, so the uniform case gets a linear profile and the OpenMC case an S-shaped one.
 * Enforce planar symmetry roller constraints and solve coupled non-linear heat conduction and isotropic linear elasticity.
 * Built-in energy balance check (`power_in` vs `power_out` postprocessors) and run-time reporting.
 
@@ -115,7 +116,7 @@ All commands are run from the repository root in WSL unless noted.
    ```bash
    python coupling/map_power.py --plot
    ```
-   *Writes `moose/openmc_power.txt` and `images/power_profile.png`. Use `--q-avg` to change the average fuel power density (default `3.0e7` W/m³). If you change it, change `value` in `moose/case_uniform.i` to match.*
+   *Writes `moose/openmc_power.txt`, `moose/openmc_coolant_temperature.csv` (helium temperature vs. height) and `images/power_profile.png`. Helium inlet/outlet temperatures and flow direction are set with `--t-in`, `--t-out`, `--flow` (defaults 250 °C → 700 °C, downward); if changed, update `coolant_temperature` in `moose/case_uniform.i` to match. Use `--q-avg` to change the average fuel power density (default `3.0e7` W/m³). If you change it, change `value` in `moose/case_uniform.i` to match.*
 
 3. **Generate Exodus FEA Mesh (re-run whenever the journal changes):**
    ```bash

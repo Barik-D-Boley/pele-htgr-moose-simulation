@@ -13,11 +13,15 @@ What it does, step by step:
      PiecewiseMultilinear function reads.
   4. Energy-conservation check: integrate the written grid over the fuel
      compact and rescale so total power is preserved exactly.
+  5. Helium heat-up: the coolant enters at --t-in and leaves at --t-out. At
+     each height, it has picked up the fraction of the total power produced
+     upstream of that point. Write T_coolant(z) for MOOSE's convection BC.
 
 Usage (from the repository root):
     python coupling/map_power.py
     python coupling/map_power.py --input neutronics/statepoint.250.h5 \
-        --output moose/openmc_power.txt --q-avg 3.0e7 --plot
+        --output moose/openmc_power.txt --q-avg 3.0e7 --plot \
+        --t-in 523.15 --t-out 973.15 --flow down
 """
 import argparse
 import glob
@@ -32,6 +36,11 @@ FUEL_CENTER_M = (0.0188, 0.0094)
 FUEL_R_M = 0.00635
 
 DEFAULT_Q_AVG = 3.0e7  # W/m^3, average power density in the fuel compact
+
+# Helium coolant (must match the uniform case in moose/case_uniform.i)
+DEFAULT_T_IN = 523.15   # K, core inlet  (250 C)
+DEFAULT_T_OUT = 973.15  # K, core outlet (700 C)
+HELIUM_CP = 5193.0      # J/kg-K, nearly constant for helium
 
 
 # ------------------------------------------------------------------------------
@@ -169,8 +178,68 @@ def write_moose_grid(path, xs, ys, zs, grid):
                 fh.write(' '.join(f'{v:.8e}' for v in grid[:, j, k]) + '\n')
 
 
-def plot_profiles(r_edges_cm, phi_edges, z_edges_cm, q, rel_err, q_avg, out_png):
-    """Axial (main effect) and radial power shapes vs. the uniform assumption."""
+# ------------------------------------------------------------------------------
+# Step 5: helium temperature along the channel
+# ------------------------------------------------------------------------------
+def coolant_temperature(z_edges, axial_power, t_in, t_out, flow='down'):
+    """Coolant temperature at each z edge from a steady energy balance.
+
+    axial_power: power produced in each axial slice (any units; only the
+    fractions matter). With flow='down' the helium enters at the top.
+    T(z) = t_in + (t_out - t_in) * (power produced upstream of z) / (total power)
+    """
+    p = np.asarray(axial_power, dtype=float)
+    frac = p / p.sum()
+    if flow == 'down':
+        upstream = np.concatenate([np.cumsum(frac[::-1])[::-1], [0.0]])
+    elif flow == 'up':
+        upstream = np.concatenate([[0.0], np.cumsum(frac)])
+    else:
+        raise ValueError("flow must be 'down' or 'up'")
+    return t_in + (t_out - t_in) * upstream
+
+
+def estimate_htc(m_dot_quarter, t_mean_k, diameter_m=2 * 0.00794):
+    """Rough helium heat transfer coefficient for the FULL coolant channel.
+
+    Returns (Reynolds number, h in W/m^2-K). Helium properties use simple
+    power-law fits; correlations: laminar Nu = 4.36, turbulent Gnielinski,
+    linear blend in the 2300-3000 transition range. For a sanity check only.
+    """
+    m_dot = 4.0 * m_dot_quarter                       # full channel
+    mu = 1.865e-5 * (t_mean_k / 273.15) ** 0.7        # Pa-s
+    k = 0.144 * (t_mean_k / 273.15) ** 0.7            # W/m-K
+    pr = 0.66
+    re = 4.0 * m_dot / (np.pi * diameter_m * mu)
+
+    def gnielinski(r):
+        f = (0.79 * np.log(r) - 1.64) ** -2
+        return (f / 8) * (r - 1000) * pr / (1 + 12.7 * np.sqrt(f / 8) * (pr ** (2 / 3) - 1))
+
+    if re < 2300:
+        nu = 4.36
+    elif re < 3000:
+        w = (re - 2300) / 700
+        nu = (1 - w) * 4.36 + w * gnielinski(3000)
+    else:
+        nu = gnielinski(re)
+    return re, nu * k / diameter_m
+
+
+def write_coolant_csv(path, z_m, t_k):
+    """Two-column file for MOOSE PiecewiseLinear (z in m, T in K)."""
+    with open(path, 'w') as fh:
+        fh.write('z,T_coolant\n')
+        for z, t in zip(z_m, t_k):
+            fh.write(f'{z:.6e},{t:.6f}\n')
+
+
+def plot_profiles(r_edges_cm, phi_edges, z_edges_cm, q, rel_err, q_avg, out_png,
+                  coolant=None):
+    """Axial (main effect) and radial power shapes vs. the uniform assumption.
+
+    coolant: optional (z_cm, T_openmc, T_uniform) to add a coolant panel.
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -181,8 +250,10 @@ def plot_profiles(r_edges_cm, phi_edges, z_edges_cm, q, rel_err, q_avg, out_png)
     z_c = 0.5 * (z_edges_cm[1:] + z_edges_cm[:-1])
     r_mm = 0.5 * (r_edges_cm[1:] + r_edges_cm[:-1]) * 10.0
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5),
-                                   gridspec_kw={'width_ratios': [1.4, 1]})
+    ncols = 3 if coolant is not None else 2
+    fig, axes = plt.subplots(1, ncols, figsize=(5 * ncols, 4.5),
+                             gridspec_kw={'width_ratios': [1.2, 1, 1.2][:ncols]})
+    ax1, ax2 = axes[0], axes[1]
     ax1.plot(axial / 1e6, z_c, 'o-', ms=3, label='OpenMC')
     ax1.axvline(q_avg / 1e6, color='gray', ls='--', label='Uniform assumption')
     ax1.set_xlabel('Power density (MW/m$^3$)')
@@ -199,6 +270,17 @@ def plot_profiles(r_edges_cm, phi_edges, z_edges_cm, q, rel_err, q_avg, out_png)
     ax2.set_ylim(0, None)
     ax2.legend()
     ax2.grid(alpha=0.3)
+
+    if coolant is not None:
+        zc, t_mc, t_un = coolant
+        ax3 = axes[2]
+        ax3.plot(t_mc - 273.15, zc, '-', label='OpenMC power shape')
+        ax3.plot(t_un - 273.15, zc, '--', color='gray', label='Uniform power')
+        ax3.set_xlabel('Helium temperature (\u00b0C)')
+        ax3.set_ylabel('Height in fuel column (cm)')
+        ax3.set_title('Coolant heat-up along the channel')
+        ax3.legend()
+        ax3.grid(alpha=0.3)
 
     fig.suptitle(f'Fission power in the fuel compact (worst bin error {100 * rel_err.max():.1f}%)')
     fig.tight_layout()
@@ -224,6 +306,13 @@ def main():
     p.add_argument('--nx', type=int, default=25)
     p.add_argument('--ny', type=int, default=25)
     p.add_argument('--nz', type=int, default=81)
+    p.add_argument('--coolant-output', default='moose/openmc_coolant_temperature.csv')
+    p.add_argument('--t-in', type=float, default=DEFAULT_T_IN,
+                   help='helium inlet temperature in K (default %(default)g)')
+    p.add_argument('--t-out', type=float, default=DEFAULT_T_OUT,
+                   help='helium outlet temperature in K (default %(default)g)')
+    p.add_argument('--flow', choices=['down', 'up'], default='down',
+                   help='helium flow direction (default: down, inlet at the top)')
     p.add_argument('--plot', action='store_true',
                    help='also save images/power_profile.png')
     args = p.parse_args()
@@ -260,9 +349,28 @@ def main():
     write_moose_grid(args.output, xs, ys, zs, grid)
     print(f'Wrote {args.output}')
 
+    # Coolant heat-up. Power per axial slice = sum over r and phi bins.
+    slice_power = (q * vol).sum(axis=(0, 1))
+    t_cool = coolant_temperature(z_e, slice_power, args.t_in, args.t_out, args.flow)
+    t_unif = coolant_temperature(z_e, np.ones_like(slice_power), args.t_in,
+                                 args.t_out, args.flow)
+    write_coolant_csv(args.coolant_output, z_e / 100.0, t_cool)
+    m_dot = target / (HELIUM_CP * (args.t_out - args.t_in))
+    i_mid = len(z_e) // 2
+    print(f'Coolant: {args.t_in - 273.15:.0f} C -> {args.t_out - 273.15:.0f} C, '
+          f'flow {args.flow}; implied helium flow {m_dot * 1e3:.3f} g/s per quarter channel')
+    print(f'  Mid-height helium temperature: OpenMC shape {t_cool[i_mid] - 273.15:.1f} C, '
+          f'uniform {t_unif[i_mid] - 273.15:.1f} C')
+    print(f'Wrote {args.coolant_output}')
+    re, h = estimate_htc(m_dot, 0.5 * (args.t_in + args.t_out))
+    regime = 'laminar' if re < 2300 else ('transitional' if re < 10000 else 'turbulent')
+    print(f'  Sanity check: Reynolds number ~{re:.0f} ({regime}); '
+          f'estimated h ~{h:.0f} W/m^2-K (MOOSE input uses 2000)')
+
     if args.plot:
         os.makedirs('images', exist_ok=True)
-        plot_profiles(r_e, p_e, z_e, q, rel_err, args.q_avg, 'images/power_profile.png')
+        plot_profiles(r_e, p_e, z_e, q, rel_err, args.q_avg, 'images/power_profile.png',
+                      coolant=(z_e, t_cool, t_unif))
 
 
 if __name__ == '__main__':

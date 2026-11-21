@@ -12,6 +12,11 @@
 #     mpiexec -n 4 combined-opt -i pele_core_sim.i case_openmc.i
 #
 # Both cases put the SAME total power into the fuel; only the shape differs.
+# Each case file defines two functions:
+#   power_density        -- fission heating in the fuel (W/m^3)
+#   coolant_temperature  -- helium temperature along the channel, T(z) in K
+# Helium flows DOWN the channel: 250 C at the top (z = 0.8 m), 700 C at the
+# bottom (z = 0). How fast it heats up depends on the case's power shape.
 # ==============================================================================
 
 [Mesh]
@@ -31,7 +36,7 @@
   [temperature]
     order = FIRST
     family = LAGRANGE
-    initial_condition = 600 # K, starting guess near coolant temperature
+    initial_condition = 750 # K, starting guess near the average coolant temperature
   []
 []
 
@@ -47,6 +52,23 @@
         temperature = temperature
       []
     []
+  []
+[]
+
+[AuxVariables]
+  # Height of each node, used to report WHERE the peak temperature occurs
+  [z_position]
+    order = FIRST
+    family = LAGRANGE
+  []
+[]
+
+[AuxKernels]
+  [z_position]
+    type = ParsedAux
+    variable = z_position
+    expression = 'z'
+    use_xyzt = true
   []
 []
 
@@ -68,12 +90,16 @@
 []
 
 [BCs]
-  # Helium cooling on the coolant channel wall
+  # Helium cooling on the coolant channel wall. The helium temperature
+  # varies with height (material property 'T_coolant', defined below).
   [convective_cooling]
     type = ConvectiveHeatFluxBC
     variable = temperature
     boundary = 'coolant_wall'
-    T_infinity = 600              # K, bulk helium temperature
+    T_infinity = T_coolant
+    # PLACEHOLDER. coupling/map_power.py estimates h from the helium flow
+    # implied by the energy balance and currently gets ~150 W/m^2-K (barely
+    # turbulent flow). Decide how to reconcile before trusting temperatures.
     heat_transfer_coefficient = 2000 # W/m^2-K
   []
 
@@ -102,6 +128,14 @@
 []
 
 [Materials]
+  # Helium temperature on the coolant wall, from the case's coolant function
+  [coolant]
+    type = GenericFunctionMaterial
+    block = 'matrix_graphite'
+    prop_names = 'T_coolant'
+    prop_values = 'coolant_temperature'
+  []
+
   # ---------------------------------------------------------------------------
   # H-451 nuclear graphite (matrix block)
   # ---------------------------------------------------------------------------
@@ -187,6 +221,17 @@
     type = ElementExtremeValue
     variable = vonmises_stress
     block = 'matrix_graphite'
+  []
+
+  # --- Where along the column is the fuel hottest? ---
+  # Reports the height (z, in m) of the node where the fuel temperature is
+  # highest: it looks up 'z_position' at the node where 'temperature' peaks.
+  [z_of_max_T_fuel]
+    type = NodalExtremeValue
+    variable = z_position
+    proxy_variable = temperature
+    block = 'fuel_compact'
+    value_type = max
   []
 
   # --- Energy conservation check: power_in should equal power_out ---
