@@ -31,6 +31,9 @@ neutronics/*.xml
 *.nem
 *.csv
 
+# Generated OpenMC -> MOOSE power grid
+moose/openmc_power.txt
+
 # MOOSE checkpoint and recovery directories
 *_cp/
 *_csv/

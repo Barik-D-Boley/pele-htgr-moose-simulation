@@ -1,57 +1,77 @@
 # ==============================================================================
-# Coreform Cubit Journal File: HTGR RVE Matrix
+# Coreform Cubit Journal File: HTGR RVE (quarter cell)
+#
+# Produces htgr_rve_mesh.e with TWO blocks:
+#   block 1 "matrix_graphite"  -- the graphite with the two quarter holes
+#   block 2 "fuel_compact"     -- the quarter fuel compact that fills the fuel hole
+# The coolant hole stays empty (it is handled by a convection BC in MOOSE).
+#
+# Layout (mm): box 18.80 x 9.40 x 20.0
+#   coolant hole r = 7.94 at corner (0, 0)
+#   fuel hole    r = 6.35 at corner (18.80, 9.40)
 # ==============================================================================
 reset
 
-# 1. Import Geometry
+# 1. Import the graphite matrix (becomes volume 1) and convert mm -> m
 import step "../cad/htgr_rve_matrix.STEP" heal
-
-# Convert to SI units (Meters)
 volume all scale 0.001
 
-# 2. Mesh Specification & Execution
-volume 1 scheme sweep
-volume 1 size 0.00055 
-mesh volume 1
+# 2. Build the quarter fuel compact (new volume):
+#    a brick the size of the whole cell, cut by a cylinder on the fuel axis,
+#    then throw away everything except the quarter-cylinder piece.
+brick x 0.0188 y 0.0094 z 0.020
+move volume 2 location 0.0094 0.0047 0.010
+webcut volume 2 with cylinder radius 0.00635 axis z center 0.0188 0.0094 0.010
+# The fuel piece's centroid is at x ~ 0.0161 m; the leftover piece's is at x ~ 0.0079 m.
+delete volume all except 1 with x_coord < 0.012
 
-# 3. Boundary Identification (Sidesets)
+# 3. Make the fuel and graphite share nodes on their common wall
+imprint volume all
+merge volume all
 
-# Top and Bottom
-create sideset 1
-sideset 1 add surface with z_coord > 0.019 
+# 4. Mesh (sweep along z)
+volume all scheme sweep
+volume all size 0.00055
+mesh volume all
+
+# 5. Sidesets (picked by position so they include faces of BOTH volumes)
+#    x_coord / y_coord / z_coord refer to the center of each surface.
+sideset 1 add surface with z_coord > 0.0199
 sideset 1 name "top_face"
 
-create sideset 2
-sideset 2 add surface with z_coord < 0.001
+sideset 2 add surface with z_coord < 0.0001
 sideset 2 name "bottom_face"
 
-# X-Axis Symmetry Planes
-sideset 3 surface 5
+sideset 3 add surface with x_coord < 0.0001
 sideset 3 name "symm_x_min"
 
-sideset 4 surface 2
+sideset 4 add surface with x_coord > 0.0187
 sideset 4 name "symm_x_max"
 
-# Y-Axis Symmetry Planes
-sideset 5 surface 1
+sideset 5 add surface with y_coord < 0.0001
 sideset 5 name "symm_y_min"
 
-sideset 6 surface 4
+sideset 6 add surface with y_coord > 0.0093
 sideset 6 name "symm_y_max"
 
-# Fuel hole
-sideset 7 surface 6
+# Curved walls (same surface numbers as the original matrix import).
+# CHECK in the GUI that these are still the right surfaces after the merge.
+sideset 7 add surface 6
 sideset 7 name "fuel_wall"
 
-# Coolant hole
-sideset 8 surface 3
+sideset 8 add surface 3
 sideset 8 name "coolant_wall"
 
-# 4. Material Block Assignment
-create block 1
+# 6. Blocks
 block 1 add volume 1
 block 1 name "matrix_graphite"
 
-# 5. Export Mesh
+block 2 add volume all except 1
+block 2 name "fuel_compact"
+
+# 7. Quality check -- look at the minimum scaled Jacobian in the output
+quality volume all scaled jacobian global
+
+# 8. Export
 export mesh "htgr_rve_mesh.e" overwrite
 system "del step_import.log"

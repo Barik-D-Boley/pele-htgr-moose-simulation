@@ -1,5 +1,5 @@
 # Coupled OpenMC–MOOSE Multiphysics Simulation of HTGR Microreactor RVE
-## Status: Active Development — Phase 3 (Data Coupling & MOOSE Multiphysics Solve)
+## Status: Active Development — Phase 3 (rebuilt for uniform vs. OpenMC comparison; awaiting first full run)
 
 A 2-step coupled neutronics and thermo-mechanical finite element simulation of a transportable High-Temperature Gas-Cooled Reactor (HTGR) microreactor core unit cell based on Project Pele. The workflow couples Monte Carlo neutron transport (**OpenMC**) with continuum thermal-stress analysis (**MOOSE Framework**).
 
@@ -7,7 +7,14 @@ A 2-step coupled neutronics and thermo-mechanical finite element simulation of a
 
 This repository models the coupled reactor physics, spatial heat generation, temperature distribution, and von Mises stress state in a TRISO fuel compact / H-451 graphite matrix Representative Volume Element (RVE). 
 
-Rather than assuming uniform heat generation, this project calculates the spatially dependent volumetric fission power density $Q(x,y,z)$ from first principles using OpenMC neutron transport, maps the resulting tally grid into MOOSE, and evaluates local stress peaking factors under steady-state and transient conditions.
+**Problem statement:** How much does a simplified physics assumption change the answer, and what does extra fidelity cost? The same MOOSE thermal-stress model is run twice with the *same total power*:
+
+| Case | Heat source in the fuel compact | Input |
+|---|---|---|
+| **A — Simplified** | Uniform volumetric heating $Q = Q_{avg}$ | `moose/case_uniform.i` |
+| **B — Higher fidelity** | Spatially varying $Q(x,y,z)$ from an OpenMC neutron transport solve | `moose/case_openmc.i` |
+
+The cases are compared on peak temperature, peak von Mises stress, and compute time (including the OpenMC run needed for Case B).
 
 * **Physics Modules:** Monte Carlo Neutron Transport, `HeatConduction`, `TensorMechanics`
 * **Software Stack:** OpenMC, MOOSE Framework, Coreform Cubit, Python (`h5py`, `scipy`), ParaView
@@ -18,21 +25,24 @@ Rather than assuming uniform heat generation, this project calculates the spatia
 
 ### Phase 1: OpenMC Neutronics & Power Tallying [*COMPLETE*]
 * Define isotopic compositions for HALEU TRISO compacts, H-451 graphite matrix, and helium channels.
-* Build a Constructive Solid Geometry (CSG) model of the $18.80\text{ mm} \times 9.40\text{ mm}$ RVE in OpenMC.
-* Execute Monte Carlo eigenvalue solve ($k_{\text{eff}}$) with a 3D RegularMesh tally to extract volumetric fission heating density $Q(x,y,z)$ in $\text{W/m}^3$.
+* Build a Constructive Solid Geometry (CSG) model of the $18.80\text{ mm} \times 9.40\text{ mm} \times 20.0\text{ mm}$ quarter-cell RVE in OpenMC, matching the CAD exactly (quarter coolant hole $r = 7.94$ mm at the origin corner, quarter fuel compact $r = 6.35$ mm at the opposite corner).
+* Model the fuel compact as homogenized TRISO particles (35% packing fraction) in a graphite binder.
+* Execute Monte Carlo eigenvalue solve ($k_{\text{eff}}$) with a cylindrical mesh tally on the fuel compact to extract the fission power shape.
 
 ### Phase 2: CAD Geometry & Coreform Cubit Meshing [*COMPLETE*]
 * Model the 3D unit cell in SolidWorks and export to `.STEP` format.
-* Execute automated Coreform Cubit journal script (`create_mesh.jou`) to generate a 10,152-element HEX8 mesh.
+* Execute automated Coreform Cubit journal script (`create_mesh.jou`) to generate a swept HEX8 mesh with two blocks: `matrix_graphite` and `fuel_compact`.
 * Define explicit surface sidesets (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) and scaling to SI units.
 
 ### Phase 3: Data Coupling & MOOSE Multiphysics Solve [*IN PROGRESS - VERIFICATION*]
-* Run Python bridge script (`coupling/map_power.py`) to parse OpenMC `statepoint.*.h5` tally outputs and format a 3D spatial grid function for MOOSE.
-* Construct primary MOOSE input file (`moose/pele_core_sim.i`) using `PiecewiseMultilinear` functions driven by OpenMC power tallies.
+* Run Python bridge script (`coupling/map_power.py`) to parse OpenMC `statepoint.*.h5` tally outputs, normalize to the target average power density, and write a 3D x-y-z grid for MOOSE.
+* Shared MOOSE base input (`moose/pele_core_sim.i`) plus two case files that only swap the heat source: `ConstantFunction` (Case A) or `PiecewiseMultilinear` driven by OpenMC (Case B).
 * Enforce planar symmetry roller constraints and solve coupled non-linear heat conduction and isotropic linear elasticity.
+* Built-in energy balance check (`power_in` vs `power_out` postprocessors) and run-time reporting.
 
 ### Phase 4: Comparative Stress Analysis & Documentation [*PLANNED*]
 * Compare thermal gradients and von Mises stress fields between realistic neutronics power profiles vs. uniform volumetric heat assumptions.
+* Compare cost: OpenMC + mapping + MOOSE wall time (Case B) vs. MOOSE alone (Case A).
 * Process Exodus II results in ParaView to identify peak stress concentrations along the fuel-graphite interface.
 * Document structural safety margins and local peaking factors for microreactor core licensing considerations.
 
@@ -42,7 +52,7 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 
 ### 1. Spatial Geometry & Mesh Quality Checks (SolidWorks & Coreform Cubit)
 * **Domain Bounding:** Verified unit cell dimensions ($18.80\text{ mm} \times 9.40\text{ mm}$) against Project Pele RVE design specs to prevent volume overlaps.
-* **Element Metrics:** Inspected the 10,152-element HEX8 mesh in Coreform Cubit to enforce minimum scaled Jacobian values $> 0.6$ and aspect ratios $< 3.0$ across high-gradient fuel-matrix interfaces.
+* **Element Metrics:** Inspected the HEX8 mesh in Coreform Cubit to enforce minimum scaled Jacobian values $> 0.6$ and aspect ratios $< 3.0$ across high-gradient fuel-matrix interfaces.
 * **Unit Consistency:** Automated scale transformations in `create_mesh.jou` to convert CAD dimensions ($\text{mm}$) to SI units ($\text{m}$) required by MOOSE.
 * **Sideset Integrity:** Validated explicit surface sideset IDs (`symm_x_min`, `symm_y_min`, `bottom_face`, `fuel_wall`, `coolant_wall`) against Exodus block exports to prevent unconstrained degrees of freedom.
 
@@ -75,26 +85,32 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 
 ## How to Run
 
+All commands are run from the repository root in WSL unless noted.
+
 1. **Run OpenMC Neutronics Solve:**
    ```bash
    python neutronics/openmc_rve_model.py
    ```
-   *Outputs `statepoint.100.h5` containing $k_{\text{eff}}$ and 3D fission power tallies.*
+   *Outputs `neutronics/statepoint.150.h5` containing $k_{\text{eff}}$ and the fuel power tally.*
 
 2. **Map OpenMC Power Density to MOOSE Grid:**
    ```bash
-   python coupling/map_power.py --input neutronics/statepoint.100.h5 --output moose/power_density.csv
+   python coupling/map_power.py --plot
+   ```
+   *Writes `moose/openmc_power.txt` and `images/radial_power_profile.png`. Use `--q-avg` to change the average fuel power density (default `3.0e7` W/m³). If you change it, change `value` in `moose/case_uniform.i` to match.*
+
+3. **Generate Exodus FEA Mesh (re-run whenever the journal changes):**
+   ```bash
+   cd meshes && cubit -nographics create_mesh.jou && cd ..
    ```
 
-3. **Generate Exodus FEA Mesh (Optional if `.e` exists):**
+4. **Execute both MOOSE cases** (from the `moose/` folder):
    ```bash
-   cubit -nographics meshes/create_mesh.jou
+   cd moose
+   mpiexec -n 4 combined-opt -i pele_core_sim.i case_uniform.i
+   mpiexec -n 4 combined-opt -i pele_core_sim.i case_openmc.i
    ```
-
-4. **Execute MOOSE Multiphysics Solver:**
-   ```bash
-   mpiexec -n 4 combined-opt -i moose/pele_core_sim.i
-   ```
+   *Outputs `pele_uniform_out.e/.csv` and `pele_openmc_out.e/.csv`. Check that `power_in` ≈ `power_out` in each CSV.*
 
 5. **Visualize Results:**
-   Open `moose/pele_core_sim_out.e` in ParaView and load `post-processing/pele_multiphysics_view.pvsm`.
+   Open `moose/pele_uniform_out.e` and `moose/pele_openmc_out.e` in ParaView side by side.
