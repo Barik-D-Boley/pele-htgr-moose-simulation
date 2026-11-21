@@ -53,7 +53,7 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 
 ## Verification & Quality Assurance (QA)
 
-To ensure numerical stability, physical conservation, and accurate multivariable coupling between OpenMC and MOOSE, this workflow executes specific verification checks across four modeling domains:
+To ensure numerical stability, physical conservation, and accurate multivariable coupling between OpenMC and MOOSE, this workflow executes specific verification checks across five areas:
 
 ### 1. Spatial Geometry & Mesh Quality Checks (SolidWorks & Coreform Cubit)
 * **Domain Bounding:** Verified unit cell dimensions ($18.80\text{ mm} \times 9.40\text{ mm}$) against Project Pele RVE design specs to prevent volume overlaps.
@@ -71,7 +71,14 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 * **Spatial Mapping:** Verified `map_power.py` grid interpolation routines using `h5py` and `SciPy` to eliminate energy leakage or spatial distortion during HDF5-to-CSV data transfer.
 * **Integrated Heat Check:** Verified total integrated volumetric fission heat ($\iiint Q(x,y,z) \, dV$) calculated from OpenMC matches the integrated heat flux input assigned across MOOSE material blocks.
 
-### 4. Continuum Mechanics & Boundary Constraints (MOOSE)
+### 4. Hand-Calculation Verification (`post-processing/hand_calcs.py`)
+* Independent estimate of the fuel temperature at every height from a chain of textbook thermal resistances: helium energy balance → film drop $q''/h$ → graphite conduction (slab approximation, reported as a range) → fuel conduction $qR^2/4k$. Order-of-magnitude thermal-stress scales ($E\alpha\Delta T$) are reported alongside.
+* Reads its settings straight from the MOOSE inputs, and when MOOSE results exist it reports whether they fall inside the hand-calculation range.
+* Pre-run estimates: peak fuel temperature ≈ 1335 °C (uniform) vs. ≈ 1630 °C (OpenMC), both at the bottom of the column. The helium film accounts for most of the rise, because the flow-consistent $h$ is low.
+
+![Hand-calculation check](images/hand_calc_check.png)
+
+### 5. Continuum Mechanics & Boundary Constraints (MOOSE)
 * **Rigid-Body Mode Elimination:** Applied planar symmetry roller constraints (`symm_x_min`, `symm_y_min`, `bottom_face`) to eliminate 6 rigid-body modes without inducing artificial thermal stresses.
 * **Material Property Mapping:** Cross-referenced temperature-dependent thermal conductivity, coefficient of thermal expansion (CTE), and Young's modulus across graphite and fuel blocks against nuclear materials handbook baselines.
 
@@ -140,5 +147,10 @@ All commands are run from the repository root in WSL unless noted.
    ```
    *Prints a side-by-side table (peak temperatures and where they occur, peak stresses, energy balance, compute time including the OpenMC run) and writes `post-processing/comparison_summary.md` and `images/case_comparison.png` (profiles along the column for both cases).*
 
-6. **Visualize Results:**
+6. **Check against hand calculations:**
+   ```bash
+   python post-processing/hand_calcs.py
+   ```
+
+7. **Visualize Results:**
    Open `moose/pele_uniform_out.e` and `moose/pele_openmc_out.e` in ParaView side by side.
