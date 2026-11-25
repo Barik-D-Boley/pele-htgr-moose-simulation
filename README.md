@@ -152,5 +152,13 @@ All commands are run from the repository root in WSL unless noted.
    python post-processing/hand_calcs.py
    ```
 
-7. **Visualize Results:**
+7. **Coolant sensitivity sweep (optional):**
+   ```bash
+   python post-processing/coolant_sweep.py setup
+   cd moose && COMBINED=combined-opt bash sweep/run_sweep.sh && cd ..
+   python post-processing/coolant_sweep.py report
+   ```
+   *Re-runs the OpenMC case with more helium flow (lower outlet temperature, higher h from the same correlation as `map_power.py`) and with higher h alone, then writes `post-processing/coolant_sweep_summary.md` and `images/coolant_sweep.png`. Run the `setup` and `report` steps in the OpenMC environment and the middle step in the MOOSE environment. About 10 minutes on 12 cores.*
+
+8. **Visualize Results:**
    Open `moose/pele_uniform_out.e` and `moose/pele_openmc_out.e` in ParaView side by side.
