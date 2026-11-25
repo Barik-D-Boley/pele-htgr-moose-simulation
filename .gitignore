@@ -44,3 +44,5 @@ moose/openmc_power.txt
 # MOOSE Compiled Executables
 *-opt
 *-dbg
+# MOOSE JIT cache (ParsedMaterial)
+.jitcache/
