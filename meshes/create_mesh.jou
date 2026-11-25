@@ -1,57 +1,95 @@
 # ==============================================================================
-# Coreform Cubit Journal File: HTGR RVE Matrix
+# Coreform Cubit Journal File: HTGR RVE (quarter cell), full 800 mm fuel column
+#
+# Produces htgr_rve_mesh.e with TWO blocks:
+#   block 1 "matrix_graphite"  -- the graphite with the two quarter holes
+#   block 2 "fuel_compact"     -- the quarter fuel compact that fills the fuel hole
+# The coolant hole stays empty (it is handled by a convection BC in MOOSE).
+#
+# EXPECTED STEP FILE (SolidWorks, units mm):
+#   x = 0 -> 18.80, y = 0 -> 9.40, z = 0 -> 800   (corner at the origin!)
+#   coolant hole r = 7.94 centered on the corner (0, 0)
+#   fuel hole    r = 6.35 centered on the corner (18.80, 9.40)
+# Height must match HEIGHT in neutronics/openmc_rve_model.py (80 cm).
 # ==============================================================================
 reset
 
-# 1. Import Geometry
-import step "../cad/htgr_rve_matrix.STEP" heal
+# ------------------------------------------------------------------------------
+# MESH SIZE SETTINGS -- the only two numbers you should need to change.
+# Elements ~= (layers) x (elements per layer, ~315 at 0.6 mm in-plane size)
+#   0.6 mm in-plane, 125 layers (6.4 mm tall)  ->  ~40,000 elements
+# Student (Learn) license limit is 50,000. If Cubit says the mesh is too big,
+# lower num_layers first (100 layers -> ~32,000).
+# ------------------------------------------------------------------------------
+#{inplane_size = 0.0006}
+#{num_layers = 125}
 
-# Convert to SI units (Meters)
+# 1. Import the graphite matrix (becomes volume 1) and convert mm -> m.
+import step "../cad/htgr_rve_matrix.STEP" heal
 volume all scale 0.001
 
-# 2. Mesh Specification & Execution
-volume 1 scheme sweep
-volume 1 size 0.00055 
-mesh volume 1
+# 2. Build the quarter fuel compact (new volume):
+#    a brick the size of the whole cell, cut by a cylinder on the fuel axis,
+#    then throw away everything except the quarter-cylinder piece.
+brick x 0.0188 y 0.0094 z 0.8
+move volume 2 location 0.0094 0.0047 0.4
+webcut volume 2 with cylinder radius 0.00635 axis z center 0.0188 0.0094 0.4
+# The fuel piece's centroid is at x ~ 0.0161 m; the leftover piece's is at x ~ 0.0079 m.
+delete volume all except 1 with x_coord < 0.012
 
-# 3. Boundary Identification (Sidesets)
+# 3. Make the fuel and graphite share nodes on their common wall
+imprint volume all
+merge volume all
 
-# Top and Bottom
-create sideset 1
-sideset 1 add surface with z_coord > 0.019 
+# 4. Mesh (sweep along z). Power and temperature change slowly along z, so
+#    elements can be much taller than they are wide without losing accuracy.
+volume all scheme sweep
+volume all size {inplane_size}
+curve with length > 0.5 interval {num_layers}
+mesh volume all
+
+# 5. Sidesets, picked by POSITION (x_coord etc. = center of each surface), so
+#    they still work if surface numbers change after re-exporting the STEP.
+sideset 1 add surface with z_coord > 0.799
 sideset 1 name "top_face"
 
-create sideset 2
-sideset 2 add surface with z_coord < 0.001
+sideset 2 add surface with z_coord < 0.0001
 sideset 2 name "bottom_face"
 
-# X-Axis Symmetry Planes
-sideset 3 surface 5
+sideset 3 add surface with x_coord < 0.0001
 sideset 3 name "symm_x_min"
 
-sideset 4 surface 2
+sideset 4 add surface with x_coord > 0.0187
 sideset 4 name "symm_x_max"
 
-# Y-Axis Symmetry Planes
-sideset 5 surface 1
+sideset 5 add surface with y_coord < 0.0001
 sideset 5 name "symm_y_min"
 
-sideset 6 surface 4
+sideset 6 add surface with y_coord > 0.0093
 sideset 6 name "symm_y_max"
 
-# Fuel hole
-sideset 7 surface 6
+# Curved walls: centers at mid-height, near each hole's corner.
+#   coolant wall center ~ (5.1, 5.1) mm;  fuel wall center ~ (14.8, 5.4) mm
+sideset 7 add surface with x_coord > 0.013 and x_coord < 0.016 and y_coord > 0.003 and y_coord < 0.008 and z_coord > 0.1 and z_coord < 0.7
 sideset 7 name "fuel_wall"
 
-# Coolant hole
-sideset 8 surface 3
+sideset 8 add surface with x_coord > 0.002 and x_coord < 0.008 and y_coord > 0.002 and y_coord < 0.008 and z_coord > 0.1 and z_coord < 0.7
 sideset 8 name "coolant_wall"
+# If the two lines above fail, find the curved surface IDs in the GUI and use
+# e.g. "sideset 7 add surface 6" and "sideset 8 add surface 3" instead.
 
-# 4. Material Block Assignment
-create block 1
+# 6. Blocks
 block 1 add volume 1
 block 1 name "matrix_graphite"
 
-# 5. Export Mesh
+block 2 add volume all except 1
+block 2 name "fuel_compact"
+
+# 7. Checks -- read these in the output before exporting:
+#    element count (must be < 50,000) and minimum scaled Jacobian (> 0.6)
+list volume all
+quality volume all scaled jacobian global
+
+# 8. Export
 export mesh "htgr_rve_mesh.e" overwrite
 system "del step_import.log"

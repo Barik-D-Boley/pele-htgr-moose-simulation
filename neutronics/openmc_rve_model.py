@@ -1,17 +1,107 @@
+"""
+OpenMC model of the Project Pele HTGR quarter-cell RVE.
+
+Geometry (cross-section matches cad/htgr_rve_matrix.STEP and the Cubit mesh):
+  * Cross-section: x = 0 -> 18.80 mm, y = 0 -> 9.40 mm
+  * Quarter COOLANT hole: radius 7.94 mm, centered on the corner (0, 0)
+  * Quarter FUEL compact: radius 6.35 mm, centered on the corner (18.80, 9.40)
+  * Everything else is H-451 graphite
+  * FULL-HEIGHT FUEL COLUMN: fuel from z = 0 to z = 80 cm (same z range as the
+    Cubit mesh), with solid graphite reflectors above and below. The coolant
+    hole runs through the reflectors.
+
+OpenMC works in centimeters, so all dimensions below are in cm.
+The four SIDE faces are reflective ("this column repeats forever sideways"),
+but the TOP and BOTTOM are vacuum (neutrons that leave are lost). That axial
+leakage is what makes the power peak in the middle of the column and drop
+off toward the ends -- the effect we want to compare against the uniform
+assumption.
+
+Output: statepoint.<batches>.h5 containing k-eff and a 'fuel_power' tally
+(fission energy deposited in each small piece of the fuel compact).
+"""
 import os
+
+import numpy as np
 import openmc
 
-# Force the script to run in its own directory (the 'neutronics' folder)
+# Run inside the 'neutronics' folder so all outputs land here
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# ==============================================================================
+# 0. DIMENSIONS (cm) -- keep in sync with the CAD / Cubit mesh
+# ==============================================================================
+CELL_X = 1.880      # RVE width  (x)
+CELL_Y = 0.940      # RVE depth  (y)
+HEIGHT = 80.0       # active fuel height (z); must match the Cubit mesh
+REFLECTOR = 40.0    # graphite reflector thickness above and below the fuel
+
+COOLANT_R = 0.794   # coolant hole radius, centered at (0, 0)
+FUEL_R = 0.635      # fuel compact radius, centered at (CELL_X, CELL_Y)
+FUEL_CENTER = (CELL_X, CELL_Y)
 
 # ==============================================================================
 # 1. MATERIALS
 # ==============================================================================
-haleu = openmc.Material(name='HALEU TRISO')
-haleu.add_nuclide('U235', 0.1975)
-haleu.add_nuclide('U238', 0.8025)
-haleu.add_element('O', 2.0)
-haleu.set_density('g/cm3', 10.5)
+# The fuel compact is thousands of tiny TRISO particles in a graphite binder.
+# Here we "homogenize" it: smear the particles evenly through the compact.
+# Each TRISO particle is a uranium kernel wrapped in 4 coating layers.
+# (Dimensions follow the standard AGR-program TRISO design.)
+
+# --- TRISO layer materials ---
+kernel = openmc.Material(name='UO2 kernel (19.75% HALEU)')
+# 19.75% enrichment is by WEIGHT. Convert to atom fractions so we can set the
+# isotopes directly (OpenMC's built-in 'enrichment=' option adds U-234 using a
+# rule that is only valid below ~5% enrichment).
+ENRICHMENT_WT = 0.1975
+n235 = ENRICHMENT_WT / 235.0439
+n238 = (1.0 - ENRICHMENT_WT) / 238.0508
+kernel.add_nuclide('U235', n235 / (n235 + n238))
+kernel.add_nuclide('U238', n238 / (n235 + n238))
+kernel.add_element('O', 2.0)
+kernel.set_density('g/cm3', 10.4)
+
+buffer = openmc.Material(name='Porous carbon buffer')
+buffer.add_element('C', 1.0)
+buffer.set_density('g/cm3', 1.05)
+
+pyc = openmc.Material(name='Pyrolytic carbon (IPyC/OPyC)')
+pyc.add_element('C', 1.0)
+pyc.set_density('g/cm3', 1.90)
+
+sic = openmc.Material(name='Silicon carbide')
+sic.add_element('Si', 1.0)
+sic.add_element('C', 1.0)
+sic.set_density('g/cm3', 3.18)
+
+compact_matrix = openmc.Material(name='Compact graphite binder')
+compact_matrix.add_element('C', 1.0)
+compact_matrix.set_density('g/cm3', 1.60)
+
+# --- Outer radius of each TRISO layer (cm) ---
+r_kernel = 0.02125            # 425 um diameter kernel
+r_buffer = r_kernel + 0.0100  # 100 um buffer
+r_ipyc = r_buffer + 0.0040    # 40 um inner PyC
+r_sic = r_ipyc + 0.0035       # 35 um SiC
+r_opyc = r_sic + 0.0040       # 40 um outer PyC
+
+PACKING_FRACTION = 0.35       # fraction of compact volume filled by particles
+
+# Volume fraction of each layer within the whole compact
+radii = [0.0, r_kernel, r_buffer, r_ipyc, r_sic, r_opyc]
+shell_fracs = [PACKING_FRACTION * (radii[i + 1]**3 - radii[i]**3) / r_opyc**3
+               for i in range(5)]
+layer_mats = [kernel, buffer, pyc, sic, pyc]
+
+# PyC appears twice (inner + outer), so merge those fractions
+mix = {}
+for mat, frac in zip(layer_mats, shell_fracs):
+    mix[mat] = mix.get(mat, 0.0) + frac
+mix[compact_matrix] = 1.0 - PACKING_FRACTION
+
+fuel = openmc.Material.mix_materials(list(mix.keys()), list(mix.values()), 'vo',
+                                     name='Homogenized TRISO compact')
+fuel.add_s_alpha_beta('c_Graphite')
 
 graphite = openmc.Material(name='H-451 Graphite')
 graphite.add_element('C', 1.0)
@@ -20,65 +110,97 @@ graphite.add_s_alpha_beta('c_Graphite')
 
 helium = openmc.Material(name='Helium Coolant')
 helium.add_element('He', 1.0)
-helium.set_density('g/cm3', 0.0015)
+helium.set_density('g/cm3', 0.0039)   # ~7 MPa, ~600 C
 
-materials = openmc.Materials([haleu, graphite, helium])
-materials.export_to_xml()
+materials = openmc.Materials([fuel, graphite, helium])
 
 # ==============================================================================
-# 2. GEOMETRY (18.80 mm x 9.40 mm RVE)
+# 2. GEOMETRY
 # ==============================================================================
-pitch_x = 1.88  # cm
-pitch_y = 0.94  # cm
-height = 2.0    # cm
+x_min = openmc.XPlane(0.0, boundary_type='reflective')
+x_max = openmc.XPlane(CELL_X, boundary_type='reflective')
+y_min = openmc.YPlane(0.0, boundary_type='reflective')
+y_max = openmc.YPlane(CELL_Y, boundary_type='reflective')
+z_bottom = openmc.ZPlane(-REFLECTOR, boundary_type='vacuum')
+z_fuel_bottom = openmc.ZPlane(0.0)
+z_fuel_top = openmc.ZPlane(HEIGHT)
+z_top = openmc.ZPlane(HEIGHT + REFLECTOR, boundary_type='vacuum')
+sides = +x_min & -x_max & +y_min & -y_max
+core = sides & +z_fuel_bottom & -z_fuel_top          # active fuel height
+column = sides & +z_bottom & -z_top                  # including reflectors
 
-min_x = openmc.XPlane(x0=-pitch_x/2, boundary_type='reflective')
-max_x = openmc.XPlane(x0=pitch_x/2, boundary_type='reflective')
-min_y = openmc.YPlane(y0=-pitch_y/2, boundary_type='reflective')
-max_y = openmc.YPlane(y0=pitch_y/2, boundary_type='reflective')
-min_z = openmc.ZPlane(z0=-height/2, boundary_type='reflective')
-max_z = openmc.ZPlane(z0=height/2, boundary_type='reflective')
+coolant_cyl = openmc.ZCylinder(x0=0.0, y0=0.0, r=COOLANT_R)
+fuel_cyl = openmc.ZCylinder(x0=FUEL_CENTER[0], y0=FUEL_CENTER[1], r=FUEL_R)
 
-fuel_cyl = openmc.ZCylinder(r=0.3)
+# Helium runs the full length of the column (through the reflectors too)
+coolant_cell = openmc.Cell(name='coolant', fill=helium, region=-coolant_cyl & column)
+# Fuel only in the active height
+fuel_cell = openmc.Cell(name='fuel', fill=fuel, region=-fuel_cyl & core)
+# Graphite everywhere else: the matrix around the fuel, plus the reflectors
+graphite_cell = openmc.Cell(name='graphite', fill=graphite,
+                            region=+coolant_cyl & column & ~(-fuel_cyl & core))
 
-fuel_cell = openmc.Cell(fill=haleu, region=-fuel_cyl & +min_z & -max_z)
-mod_cell = openmc.Cell(fill=graphite, region=+fuel_cyl & +min_x & -max_x & +min_y & -max_y & +min_z & -max_z)
-
-universe = openmc.Universe(cells=[fuel_cell, mod_cell])
-geometry = openmc.Geometry(universe)
-geometry.export_to_xml()
+geometry = openmc.Geometry([fuel_cell, coolant_cell, graphite_cell])
 
 # ==============================================================================
 # 3. SETTINGS
 # ==============================================================================
 settings = openmc.Settings()
-settings.batches = 100
-settings.inactive = 20
-settings.particles = 1000
+settings.batches = 250      # total batches
+settings.inactive = 100     # batches thrown away while the fission source settles
+settings.particles = 20000  # neutrons per batch (more = less statistical noise)
 
-# Initial source distribution
-space = openmc.stats.Box([-pitch_x/2, -pitch_y/2, -height/2], 
-                         [pitch_x/2, pitch_y/2, height/2])
-settings.source = openmc.IndependentSource(space=space)
-settings.export_to_xml()
+# Shannon entropy: one number per batch that measures how spread out the
+# fission source is. When it stops drifting, the source has settled and it is
+# safe to start tallying. Check it with neutronics/check_convergence.py.
+entropy_mesh = openmc.RegularMesh()
+entropy_mesh.lower_left = [0.0, 0.0, 0.0]
+entropy_mesh.upper_right = [CELL_X, CELL_Y, HEIGHT]
+entropy_mesh.dimension = [1, 1, 40]
+settings.entropy_mesh = entropy_mesh
+
+# Start neutrons uniformly in the fuel compact region
+source_box = openmc.stats.Box(
+    [FUEL_CENTER[0] - FUEL_R, FUEL_CENTER[1] - FUEL_R, 0.0],
+    [FUEL_CENTER[0], FUEL_CENTER[1], HEIGHT])
+settings.source = openmc.IndependentSource(space=source_box,
+                                           constraints={'fissionable': True})
 
 # ==============================================================================
-# 4. TALLIES (For MOOSE Coupling)
+# 4. TALLIES (for MOOSE coupling)
 # ==============================================================================
-# Create a 3D mesh for spatial power mapping
-mesh = openmc.RegularMesh()
-mesh.dimension = [10, 10, 10]
-mesh.lower_left = [-pitch_x/2, -pitch_y/2, -height/2]
-mesh.upper_right = [pitch_x/2, pitch_y/2, height/2]
+# A cylindrical mesh wrapped around the fuel axis, covering ONLY the fuel.
+# This way no tally bin is half-fuel/half-graphite.
+#   r:   5 equal-AREA rings (so each ring gets similar statistics)
+#   phi: 3 slices across the quarter (180 deg -> 270 deg points into the cell)
+#   z:   40 axial slices of 2 cm -- the axial shape is the main effect now
+fuel_mesh = openmc.CylindricalMesh(
+    r_grid=FUEL_R * np.sqrt(np.linspace(0.0, 1.0, 6)),
+    phi_grid=np.linspace(np.pi, 1.5 * np.pi, 4),
+    z_grid=np.linspace(0.0, HEIGHT, 41),
+    origin=(FUEL_CENTER[0], FUEL_CENTER[1], 0.0),
+    name='fuel_mesh')
 
-power_tally = openmc.Tally(name='power_density')
-power_tally.filters = [openmc.MeshFilter(mesh)]
-power_tally.scores = ['kappa-fission']
+power_tally = openmc.Tally(name='fuel_power')
+power_tally.filters = [openmc.MeshFilter(fuel_mesh)]
+power_tally.scores = ['kappa-fission']   # recoverable fission energy
+# IMPORTANT: use the 'collision' estimator. With the default tracklength
+# estimator, this cylindrical mesh (whose edges sit exactly on the reflective
+# cell boundaries) gave badly wrong shapes in OpenMC 0.16: a fake ~16%
+# center-to-edge tilt and fake end bumps. Collision results were verified
+# against an independent fine RegularMesh tally and agree to within ~0.5%.
+power_tally.estimator = 'collision'
 
 tallies = openmc.Tallies([power_tally])
-tallies.export_to_xml()
 
 # ==============================================================================
 # 5. RUN
 # ==============================================================================
-openmc.run()
+model = openmc.Model(geometry=geometry, materials=materials,
+                     settings=settings, tallies=tallies)
+
+if __name__ == '__main__':
+    statepoint_path = model.run()
+    with openmc.StatePoint(statepoint_path) as sp:
+        print(f'\nk-eff = {sp.keff}')
+    print(f'Results written to {statepoint_path}')

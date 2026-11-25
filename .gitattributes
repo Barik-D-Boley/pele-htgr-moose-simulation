@@ -2,3 +2,6 @@
 *.e linguist-vendored
 *.jou linguist-documentation
 *.py linguist-language=Python
+# MOOSE rejects CRLF line endings in input files
+*.i text eol=lf
+*.jou text eol=lf

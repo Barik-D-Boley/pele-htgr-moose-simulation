@@ -3,6 +3,9 @@
 Thumbs.db
 .vscode/
 
+# SolidWorks / Office temporary lock files
+~$*
+
 # Python & Environment Cache
 __pycache__/
 *.py[cod]
@@ -31,6 +34,9 @@ neutronics/*.xml
 *.nem
 *.csv
 
+# Generated OpenMC -> MOOSE power grid
+moose/openmc_power.txt
+
 # MOOSE checkpoint and recovery directories
 *_cp/
 *_csv/
@@ -38,3 +44,5 @@ neutronics/*.xml
 # MOOSE Compiled Executables
 *-opt
 *-dbg
+# MOOSE JIT cache (ParsedMaterial)
+.jitcache/
