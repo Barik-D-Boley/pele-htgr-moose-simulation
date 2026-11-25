@@ -19,6 +19,10 @@
 # bottom (z = 0). How fast it heats up depends on the case's power shape.
 # ==============================================================================
 
+# Helium-side heat transfer coefficient (W/m^2-K), used by the cooling BC and
+# by the power_out energy check. See the note in [BCs] before changing it.
+h_wall = 150
+
 [Mesh]
   # SI-scaled (meters) Exodus mesh from meshes/create_mesh.jou
   # Blocks:  matrix_graphite, fuel_compact
@@ -116,7 +120,7 @@
     # estimate ("Sanity check: ... estimated h") -- if you change the power
     # or the inlet/outlet temperatures, update this number to match.
     # (Earlier placeholder was 2000, which would need ~10x more flow.)
-    heat_transfer_coefficient = 150 # W/m^2-K
+    heat_transfer_coefficient = ${h_wall} # W/m^2-K, set at the top of this file
   []
 
   # All other outer faces: no heat flow (default), because neighboring cells
@@ -256,7 +260,21 @@
     function = power_density
     block = 'fuel_compact'
   []
+  # Heat removed by the helium: integral of h*(T - T_coolant) over the
+  # coolant wall -- the same expression the cooling BC applies, so it is the
+  # flux the solver actually balances against power_in.
   [power_out]
+    type = ConvectiveHeatTransferSideIntegral
+    T_solid = temperature
+    T_fluid = T_coolant
+    htc = ${h_wall}
+    boundary = 'coolant_wall'
+  []
+  # Same quantity from -k*grad(T) at the wall. On linear elements the
+  # gradient is only first-order accurate at the boundary, so this reads a few
+  # percent low on the curved coolant wall. Kept as a mesh-resolution
+  # diagnostic: it should approach power_out as the mesh is refined.
+  [power_out_gradient]
     type = SideDiffusiveFluxIntegral
     variable = temperature
     diffusivity = thermal_conductivity

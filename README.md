@@ -139,7 +139,7 @@ All commands are run from the repository root in WSL unless noted.
    mpiexec -n 4 combined-opt -i pele_core_sim.i case_uniform.i
    mpiexec -n 4 combined-opt -i pele_core_sim.i case_openmc.i
    ```
-   *Outputs `pele_uniform_out.e/.csv` and `pele_openmc_out.e/.csv`. Check that `power_in` ≈ `power_out` in each CSV.*
+   *Outputs `pele_uniform_out.e/.csv` and `pele_openmc_out.e/.csv`. Check that `power_in` ≈ `power_out` in each CSV (`power_out` is the convective heat removed, h·(T − T_coolant), over the coolant wall). `power_out_gradient` is the same heat measured from −k∇T at the wall; it reads ~4% low on this mesh and is only a mesh-resolution diagnostic.*
 
 5. **Compare the two cases** (from the repository root):
    ```bash

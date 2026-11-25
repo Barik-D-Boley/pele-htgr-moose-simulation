@@ -96,6 +96,13 @@ def build_rows(pp, t_openmc):
         ('Energy balance error (out vs. in)', balance(u), balance(o), '%', '{:+.2f}'),
         ('MOOSE run time', u['run_time'], o['run_time'], 's', '{:.1f}'),
     ]
+    # Diagnostic: heat out from -k*grad(T) at the wall (reads low on a coarse
+    # mesh). Only in CSVs from runs that have the power_out_gradient postprocessor.
+    if 'power_out_gradient' in u and 'power_out_gradient' in o:
+        def grad_balance(d):
+            return 100.0 * (d['power_out_gradient'] / d['power_in'] - 1.0)
+        rows.insert(7, ('Wall-gradient heat flux vs. in (mesh diagnostic)',
+                        grad_balance(u), grad_balance(o), '%', '{:+.2f}'))
     if t_openmc is not None:
         rows.append(('OpenMC run time (needed for Case B only)', 0.0, t_openmc, 's', '{:.0f}'))
         rows.append(('Total compute time', u['run_time'], o['run_time'] + t_openmc, 's', '{:.0f}'))

@@ -75,7 +75,9 @@ def read_number(path, pattern, default):
 def read_settings(moose_dir):
     base = os.path.join(moose_dir, 'pele_core_sim.i')
     uni = os.path.join(moose_dir, 'case_uniform.i')
-    h = read_number(base, r'heat_transfer_coefficient\s*=\s*([0-9.eE+-]+)', 150.0)
+    h = read_number(base, r'(?m)^\s*h_wall\s*=\s*([0-9.eE+-]+)', None)
+    if h is None:
+        h = read_number(base, r'heat_transfer_coefficient\s*=\s*([0-9.eE+-]+)', 150.0)
     q_avg = read_number(uni, r'value\s*=\s*([0-9.eE+-]+)', 3.0e7)
     m = re.search(r"symbol_values\s*=\s*'([^']+)'", open(uni).read()) if os.path.exists(uni) else None
     t_in, t_out, height = (map(float, m.group(1).split()) if m else (523.15, 973.15, 0.8))
