@@ -3,6 +3,9 @@
 Thumbs.db
 .vscode/
 
+# SolidWorks / Office temporary lock files
+~$*
+
 # Python & Environment Cache
 __pycache__/
 *.py[cod]
