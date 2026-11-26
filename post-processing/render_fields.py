@@ -120,11 +120,11 @@ def main():
         for v in views:
             Render(v)   # first render resets the camera, so set ours after it
             # Same camera in both panels; leave room on the right for the color bar
-            v.CameraPosition = [0.0122, 0.0047, 0.2]
-            v.CameraFocalPoint = [0.0122, 0.0047, Z_SLICE]
+            v.CameraPosition = [0.0123, 0.0047, 0.2]
+            v.CameraFocalPoint = [0.0123, 0.0047, Z_SLICE]
             v.CameraViewUp = [0, 1, 0]
             v.CameraParallelProjection = 1
-            v.CameraParallelScale = 0.0072
+            v.CameraParallelScale = 0.0076
             Render(v)
         path = os.path.join(out_dir, png)
         SaveScreenshot(path, layout, ImageResolution=[1400, 420])

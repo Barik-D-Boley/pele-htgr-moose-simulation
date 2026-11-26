@@ -41,7 +41,7 @@ The cases are compared on peak temperature, peak von Mises stress, and compute t
 * Shared MOOSE base input (`moose/pele_core_sim.i`) plus two case files that only swap the heat source: `ConstantFunction` (Case A) or `PiecewiseMultilinear` driven by OpenMC (Case B).
 * Helium coolant temperature varies with height from a channel energy balance (downward flow, 250 °C inlet → 700 °C outlet). Each case uses its own power shape for the heat-up, so the uniform case gets a linear profile and the OpenMC case an S-shaped one.
 * The wall heat transfer coefficient ($h \approx 150\text{ W/m}^2\text{K}$) is made consistent with the helium flow implied by that energy balance (Reynolds number ~2,800, barely turbulent), rather than assumed.
-* Enforce planar symmetry roller constraints and solve coupled non-linear heat conduction and isotropic linear elasticity.
+* Enforce planar symmetry roller constraints on the inner faces, keep the outer $x$ and $y$ faces flat (they are mid-planes shared with neighboring cells), and solve coupled non-linear heat conduction and isotropic linear elasticity.
 * Built-in energy balance check (`power_in` vs `power_out` postprocessors) and run-time reporting.
 
 ### Phase 4: Comparative Stress Analysis & Documentation [*IN PROGRESS*] — see [Results](#results-phase-4)
@@ -81,6 +81,7 @@ To ensure numerical stability, physical conservation, and accurate multivariable
 
 ### 5. Continuum Mechanics & Boundary Constraints (MOOSE)
 * **Rigid-Body Mode Elimination:** Applied planar symmetry roller constraints (`symm_x_min`, `symm_y_min`, `bottom_face`) to eliminate 6 rigid-body modes without inducing artificial thermal stresses.
+* **Lattice Symmetry:** The outer faces (`symm_x_max`, `symm_y_max`) are shared mid-planes with the neighboring cells, so they are held flat but free to move as a whole (`EqualValueBoundaryConstraint`, penalty $10^{12}$ N/m). The `x_max_disp_*` and `y_max_disp_*` postprocessors confirm each face stays flat to about one part in $10^6$. The top of the column is left free.
 * **Material Property Mapping:** Cross-referenced temperature-dependent thermal conductivity, coefficient of thermal expansion (CTE), and Young's modulus across graphite and fuel blocks against nuclear materials handbook baselines.
 
 ## Project Structure
@@ -120,16 +121,16 @@ All results below are for the current inputs: average compact power density $3\t
 | Peak fuel temperature | 1341 °C | 1566 °C | +225 °C |
 | Height of peak fuel temperature | 0 cm (helium outlet) | 0 cm (helium outlet) | — |
 | Peak graphite temperature | 1332 °C | 1554 °C | +222 °C |
-| Peak von Mises stress, fuel | 18.3 MPa | 22.0 MPa | +20% |
-| Peak von Mises stress, graphite* | 11.5 MPa | 14.8 MPa | +29% |
+| Peak von Mises stress, fuel | 16.8 MPa | 22.0 MPa | +31% |
+| Peak von Mises stress, graphite* | 31.9 MPa | 55.1 MPa | +73% |
 | Energy balance (heat out vs. in) | +0.00 % | +0.00 % | — |
-| Compute time | 102 s (MOOSE) | 113 s (MOOSE) + 547 s (OpenMC) | ≈ 6.5× |
+| Compute time | 73 s (MOOSE) | 74 s (MOOSE) + 547 s (OpenMC) | ≈ 8.5× |
 
-\*Not mesh-converged; see [Mesh convergence](#mesh-convergence).
+\*Converged to about 1%; see [Mesh convergence](#mesh-convergence).
 
 * **Both cases put the hottest fuel at the bottom of the column**, where the helium is hottest. In the OpenMC case the reflector-driven power peak (1.43× average) lands on that same spot, so the uniform assumption under-predicts peak fuel temperature by 225 °C. In the middle of the column the uniform case slightly over-predicts, because the OpenMC power there is ~8% below average.
-* **Stress follows temperature.** Peak fuel stress sits on the compact's edge where it meets the cell's outer $x$ face, near the bottom of the column, and rises 20% with the OpenMC shape.
-* **Cost.** Case B costs about 6.5× the compute, almost all of it the OpenMC run (12 threads). The MOOSE solve itself costs about the same for either heat source.
+* **Stress follows temperature, and concentrates in two thin graphite strips.** The highest stress is in the 1.46 mm strip between the coolant hole and the cell's outer $y$ face, at the bottom of the column. It is mostly compressive (hydrostatic stress −13.6 MPa there in Case B). The second strip, below the fuel compact along the outer $x$ face, is where peak fuel stress sits. Both rise with the OpenMC shape: fuel +31%, graphite +73%.
+* **Cost.** Case B costs about 8.5× the compute, almost all of it the OpenMC run (12 threads). The MOOSE solve itself costs the same for either heat source.
 
 ![Profiles along the column](images/case_comparison.png)
 
@@ -147,7 +148,8 @@ The baseline OpenMC run uses room-temperature nuclear data. Re-running at operat
 | $k_{\text{eff}}$ | — | 1.2171 | 1.1182 |
 | Axial power peaking factor | 1.00 | 1.43 | 1.23 |
 | Peak fuel temperature | 1341 °C | 1566 °C | 1464 °C |
-| Peak fuel stress | 18.3 MPa | 22.0 MPa | 20.3 MPa |
+| Peak fuel stress | 16.8 MPa | 22.0 MPa | 17.8 MPa |
+| Peak graphite stress | 31.9 MPa | 55.1 MPa | 44.6 MPa |
 
 The end peaks flatten, most likely because hot graphite and fuel shift the neutron spectrum and weaken the thermal-flux build-up from the reflectors (not yet checked with a spectrum tally). **The uniform assumption still under-predicts peak fuel temperature, but by 123 °C rather than 225 °C.** Room-temperature data nearly double the apparent penalty of the simple model.
 
@@ -167,23 +169,25 @@ With the current coolant inputs, every case runs above the normal-operation refe
 
 ### Coolant sensitivity
 
-Most of the fuel temperature rise is the helium film, because the flow implied by a 450 K helium rise is only 1.3 g/s per channel ($Re \approx 2800$, $h \approx 150$ W/m²·K). About 1.4× that flow (outlet ≈ 570 °C), or $h \approx 280$ W/m²·K on its own, brings peak fuel under ~1250 °C. Full table: `post-processing/coolant_sweep_summary.md`.
+Most of the fuel temperature rise is the helium film, because the flow implied by a 450 K helium rise is only 1.3 g/s per channel ($Re \approx 2800$, $h \approx 150$ W/m²·K). About 1.4× that flow (outlet ≈ 570 °C), or $h \approx 280$ W/m²·K on its own, brings peak fuel under ~1250 °C. Stress drops with temperature: at 1.5× the flow, peak graphite stress falls from 55.7 to 37.4 MPa. Full table: `post-processing/coolant_sweep_summary.md`.
 
 ![Coolant sensitivity](images/coolant_sweep.png)
 
 ### Mesh convergence
 
-The OpenMC case was re-run with every element split into 8 (MOOSE `uniform_refine = 1`, ~340,000 elements; the 50,000-element limit applies only to Cubit Learn):
+The OpenMC case was run on three Cubit meshes, each with about 1.4× smaller elements than the last (the finest is the baseline, close to the 50,000-element Cubit Learn limit):
 
-| | Baseline (~42,500 elements) | Refined (~340,000) | Change |
-|---|---|---|---|
-| Peak fuel temperature | 1566.13 °C | 1566.21 °C | +0.08 K |
-| Peak von Mises stress, fuel | 21.98 MPa | 22.50 MPa | +2.4% |
-| Peak von Mises stress, graphite | 14.82 MPa | 21.60 MPa | +46% |
-| Wall-gradient heat flux vs. heat in | −4.3% | −2.4% | converging |
-| Wall time | 113 s (4 ranks) | 14 min (6 ranks) | |
+| Mesh | Elements | Peak fuel T | Peak fuel stress | Peak graphite stress | Wall-gradient heat flux vs. in |
+|---|---|---|---|---|---|
+| Coarse (1.2 mm in-plane, 63 layers) | 4,788 | 1563.06 °C | 21.06 MPa | 52.45 MPa | −10.6% |
+| Medium (0.85 mm, 88 layers) | 14,608 | 1565.50 °C | 21.64 MPa | 54.74 MPa | −5.3% |
+| **Baseline** (0.6 mm, 125 layers) | 42,500 | 1566.15 °C | 22.03 MPa | 55.07 MPa | −4.4% |
 
-Temperatures are converged, and fuel stress is within a few percent. Peak graphite stress is not: it sits at the top and bottom ends of the 1.5 mm graphite strip between the coolant hole and the cell's outer $y$ face. That face is currently free, which leaves a free corner there. In a repeating lattice it is a shared mid-plane, so the graphite peak should be re-checked with the outer faces kept planar before it is quoted.
+* **Temperature is converged:** the last refinement moved the peak by 0.65 K.
+* **Peak graphite stress is converged to about 1%:** the change shrank from 2.3 MPa to 0.3 MPa. It sits in the 1.46 mm strip between the coolant hole and the outer $y$ face, at the bottom of the column.
+* **Peak fuel stress converges more slowly** (0.58 then 0.39 MPa). Extrapolating suggests the baseline is 3–4% low, so read it as about 22–23 MPa.
+
+A fully refined mesh can't be run here: MOOSE's `uniform_refine = 1` (~340,000 elements) needs more than the 10 GB available to WSL with the coupled Newton solve. An earlier run of it, before the outer faces were held flat, is why that boundary condition was fixed. On free outer faces, peak graphite stress rose 46% under refinement, because the strip ended in a free corner.
 
 ### Limitations
 
@@ -192,8 +196,7 @@ The main inputs still under review, in rough order of how much they could move t
 * **Helium flow per channel and $h$**: set by pairing one coolant hole with one fuel compact at $3\times10^7$ W/m³. See the coolant sweep.
 * **Fuel compact properties**: placeholder values in `moose/pele_core_sim.i`.
 * **Compact-to-graphite gap**: the compact is modeled as bonded to the graphite. A real gas gap would add a temperature drop.
-* **Unirradiated graphite**: conductivity, and no irradiation shrinkage or creep, which dominate in-service graphite stress.
-* **Free outer faces** in the mechanical model. This affects peak graphite stress, and peak fuel stress also sits on one of these faces.
+* **Unirradiated, elastic graphite**: unirradiated conductivity, no irradiation shrinkage or creep, and a 300 K stress-free temperature. Shrinkage and creep dominate in-service graphite stress, so the graphite strip stresses are the numbers most likely to change.
 * **One-way coupling**: a single OpenMC run at one uniform temperature per material, with no iteration with MOOSE.
 
 ## How to Run
@@ -264,10 +267,12 @@ All commands are run from the repository root in WSL unless noted.
 
 9. **Mesh convergence check (optional):**
    ```bash
-   cd moose && mpiexec -n 6 combined-opt -i pele_core_sim.i case_openmc.i Mesh/uniform_refine=1 \
-       Outputs/file_base=refine/pele_openmc_refined Outputs/exodus=false && cd ..
+   cd moose
+   mpiexec -n 4 combined-opt -i pele_core_sim.i case_openmc.i Mesh/fmg/file=../meshes/htgr_rve_mesh_coarse.e Outputs/file_base=refine/openmc_coarse
+   mpiexec -n 4 combined-opt -i pele_core_sim.i case_openmc.i Mesh/fmg/file=../meshes/htgr_rve_mesh_medium.e Outputs/file_base=refine/openmc_medium
+   cd ..
    ```
-   *Splits every element into 8 (~340,000 elements) and writes `moose/refine/pele_openmc_refined.csv` to compare with `moose/pele_openmc_out.csv`. About 15 minutes on 6 ranks.*
+   *Compare `moose/refine/openmc_coarse.csv` and `openmc_medium.csv` with `moose/pele_openmc_out.csv`. The coarse and medium meshes come from `meshes/create_mesh.jou` with `inplane_size` / `num_layers` set to 0.0012 / 63 and 0.00085 / 88, and the export name changed. About 1 minute in total.*
 
 10. **Field images** (ParaView's Python, on Windows or wherever ParaView is installed):
     ```bash
