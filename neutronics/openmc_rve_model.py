@@ -199,8 +199,42 @@ tallies = openmc.Tallies([power_tally])
 model = openmc.Model(geometry=geometry, materials=materials,
                      settings=settings, tallies=tallies)
 
+# ------------------------------------------------------------------------------
+# Optional: run at operating temperatures instead of room temperature.
+# By default no material temperature is set, so OpenMC uses the data closest
+# to room temperature (~294 K). With --operating-temps the materials are set
+# to the volume-averaged temperatures from the MOOSE OpenMC case (h = 150
+# W/m^2-K, 250 -> 700 C helium) and OpenMC interpolates the nuclear data
+# between the library temperatures (294/600/900/1200/2500 K; graphite
+# scattering up to 2000 K). Results go to neutronics/hot/ so the baseline
+# statepoint is untouched.
+# ------------------------------------------------------------------------------
+T_FUEL_K = 1377.0       # fuel compact volume average (MOOSE, OpenMC case)
+T_GRAPHITE_K = 1313.0   # graphite volume average (MOOSE, OpenMC case)
+T_HELIUM_K = 748.0      # helium mean of 250 C inlet and 700 C outlet
+
+
+def use_operating_temperatures():
+    fuel.temperature = T_FUEL_K
+    graphite.temperature = T_GRAPHITE_K
+    helium.temperature = T_HELIUM_K
+    settings.temperature = {'method': 'interpolation'}
+
+
 if __name__ == '__main__':
-    statepoint_path = model.run()
+    import argparse
+    p = argparse.ArgumentParser(description='Run the OpenMC RVE model.')
+    p.add_argument('--operating-temps', action='store_true',
+                   help='set material temperatures to operating values; write to neutronics/hot/')
+    args = p.parse_args()
+    run_dir = '.'
+    if args.operating_temps:
+        use_operating_temperatures()
+        run_dir = 'hot'
+        os.makedirs(run_dir, exist_ok=True)
+        print(f'Operating temperatures: fuel {T_FUEL_K:.0f} K, graphite {T_GRAPHITE_K:.0f} K, '
+              f'helium {T_HELIUM_K:.0f} K')
+    statepoint_path = model.run(cwd=run_dir)
     with openmc.StatePoint(statepoint_path) as sp:
         print(f'\nk-eff = {sp.keff}')
     print(f'Results written to {statepoint_path}')

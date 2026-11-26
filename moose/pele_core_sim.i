@@ -23,6 +23,12 @@
 # by the power_out energy check. See the note in [BCs] before changing it.
 h_wall = 150
 
+# Penalty (N/m) that keeps the outer x and y faces flat (see [Constraints]).
+# About 1e5 times the stiffness of one element (E * element size ~ 6e6 N/m):
+# stiff enough that the faces stay flat to ~1e-5 of their movement, but not so
+# stiff that the linear solver struggles.
+planar_penalty = 1e12
+
 [Mesh]
   # SI-scaled (meters) Exodus mesh from meshes/create_mesh.jou
   # Blocks:  matrix_graphite, fuel_compact
@@ -147,6 +153,27 @@ h_wall = 150
   []
 []
 
+[Constraints]
+  # The outer x and y faces are mid-planes shared with the neighboring cells
+  # of the lattice, so by symmetry they stay FLAT. They may still move as a
+  # whole (the lattice expands as it heats up), so instead of fixing them we
+  # make every node on each face move by the same amount. Left free, the thin
+  # graphite strip next to the coolant hole had a free corner at the column
+  # ends, where peak stress kept rising as the mesh was refined.
+  [x_max_planar]
+    type = EqualValueBoundaryConstraint
+    variable = disp_x
+    secondary = 'symm_x_max'
+    penalty = ${planar_penalty}
+  []
+  [y_max_planar]
+    type = EqualValueBoundaryConstraint
+    variable = disp_y
+    secondary = 'symm_y_max'
+    penalty = ${planar_penalty}
+  []
+[]
+
 [Materials]
   # Helium temperature on the coolant wall, from the case's coolant function
   [coolant]
@@ -212,9 +239,19 @@ h_wall = 150
   []
 []
 
+[Preconditioning]
+  # Full coupling between variables in the preconditioner. Needed for the
+  # flat-face penalty constraints: without it the preconditioner misses the
+  # penalty terms and the solve stalls.
+  [smp]
+    type = SMP
+    full = true
+  []
+[]
+
 [Executioner]
   type = Steady
-  solve_type = 'PJFNK'
+  solve_type = 'NEWTON'
   petsc_options_iname = '-pc_type -pc_hypre_type'
   petsc_options_value = 'hypre boomeramg'
   nl_rel_tol = 1e-8
@@ -282,6 +319,33 @@ h_wall = 150
   []
 
   # --- Compute time (seconds) for the cost comparison ---
+  # --- Flatness check for the outer faces (see [Constraints]) ---
+  # Each pair should be equal to within a tiny fraction of its value.
+  [x_max_disp_min]
+    type = NodalExtremeValue
+    variable = disp_x
+    boundary = 'symm_x_max'
+    value_type = min
+  []
+  [x_max_disp_max]
+    type = NodalExtremeValue
+    variable = disp_x
+    boundary = 'symm_x_max'
+    value_type = max
+  []
+  [y_max_disp_min]
+    type = NodalExtremeValue
+    variable = disp_y
+    boundary = 'symm_y_max'
+    value_type = min
+  []
+  [y_max_disp_max]
+    type = NodalExtremeValue
+    variable = disp_y
+    boundary = 'symm_y_max'
+    value_type = max
+  []
+
   [run_time]
     type = PerfGraphData
     section_name = 'Root'
