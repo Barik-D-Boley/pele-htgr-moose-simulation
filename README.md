@@ -278,7 +278,7 @@ All commands are run from the repository root in WSL unless noted.
     ```bash
     pvpython post-processing/render_fields.py
     ```
-    *Writes `images/field_temperature.png` and `images/field_vonmises.png`: cross-sections at the hottest height for both cases on a shared color scale.*
+    *Writes `images/field_temperature.png` and `images/field_vonmises.png`: cross-sections at the hottest height for both cases on a shared color scale.* `pvpython post-processing/portfolio_renders.py` writes 1920×1080 presentation renders (full unit cell mirrored from the quarter model: geometry, mesh, temperature, stresses, displacement, OpenMC power) to `images/portfolio/`.
 
 11. **Visualize Results:**
     Open `moose/pele_uniform_out.e` and `moose/pele_openmc_out.e` in ParaView side by side.
